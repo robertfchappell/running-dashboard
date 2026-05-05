@@ -1,0 +1,14 @@
+{
+  "name": "running-strava-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A local Strava-powered running dashboard with OAuth login, SQLite persistence, trends, charts, and recent runs.",
+  "scripts": {
+    "start": "node server/app.js",
+    "dev": "node --watch server/app.js"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
