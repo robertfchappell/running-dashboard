@@ -354,8 +354,7 @@ function renderDashboard(data) {
   const syncLabel = data.lastSync?.completed_at
     ? `Last sync ${formatDateTime(data.lastSync.completed_at)}`
     : 'Ready to sync';
-  const focusHref =
-    state.demoMode ? '/demo/focus' : data.appMode === 'demo' || data.isPremium ? '/focus' : '/billing';
+  const focusHref = state.demoMode ? '/demo/focus' : '/focus';
   const accountActions = state.demoMode
     ? '<a class="secondary-button topbar-link" href="/">Connect Strava</a>'
     : `<button class="secondary-button" data-action="sync">${icons.sync}<span>Sync</span></button>
