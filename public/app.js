@@ -48,8 +48,9 @@ init().catch((error) => {
 });
 
 async function init() {
-  state.demoMode = window.location.pathname.startsWith('/demo');
-  if (state.demoMode) {
+  const demoPath = window.location.pathname.startsWith('/demo');
+  if (demoPath) {
+    state.demoMode = true;
     loadDemoDashboard();
     return;
   }
@@ -64,6 +65,12 @@ async function init() {
     api('/api/config/status'),
     api('/api/me')
   ]);
+
+  if (configStatus.appMode === 'demo') {
+    state.demoMode = true;
+    loadDemoDashboard();
+    return;
+  }
 
   if (!configStatus.configured) {
     renderLogin(configStatus, false);
@@ -355,8 +362,14 @@ function renderFocusPage(data) {
   const sport = data.sports.run;
   const metrics = sport.focusMetrics;
   const focus = getFocus(metrics);
-  const plan = getPlan(focus);
-  const diagnosis = getImprovementDiagnosis(metrics, focus, plan);
+  const diagnosis = getImprovementDiagnosis(metrics, focus);
+  const targets = getThisWeekTargets(metrics, focus, diagnosis.status);
+  const plan = getPlan(focus, targets, diagnosis.status);
+  const oneThing = getOneThing(focus, diagnosis.status);
+  const access = getFocusAccess(data);
+  diagnosis.fix = access.isLocked
+    ? 'Start with the one thing below. Unlock Focus for exact runs, mileage, and long-run targets.'
+    : getDiagnosisFix(focus, targets);
   const athleteName = data.athlete?.name || 'Athlete';
   const syncLabel = data.lastSync?.completed_at
     ? `Last sync ${formatDateTime(data.lastSync.completed_at)}`
@@ -391,6 +404,8 @@ function renderFocusPage(data) {
           <p>${escapeHtml(plan.explanation)}</p>
         </section>
 
+        ${access.isDemo ? '<div class="demo-mode-banner">Demo Mode - Focus is a premium feature in the full app</div>' : ''}
+
         <section class="focus-diagnosis" aria-label="Training diagnosis">
           <article class="focus-answer focus-answer-primary ${escapeHtml(diagnosis.status)}">
             <span>Are you actually improving?</span>
@@ -417,9 +432,24 @@ function renderFocusPage(data) {
                 <span>${escapeHtml(sport.label)}</span>
               </div>
             </div>
-            <ul class="focus-actions">
-              ${plan.actions.map((action) => `<li>${escapeHtml(action)}</li>`).join('')}
-            </ul>
+            <p class="one-thing"><strong>If you do ONE thing:</strong> ${escapeHtml(oneThing)}</p>
+            <div class="premium-lock-wrap ${access.isLocked ? 'is-locked' : ''}">
+              <div class="${access.isLocked ? 'premium-locked' : ''}">
+                <div class="this-week">
+                  <span class="this-week-title">THIS WEEK</span>
+                  <div class="this-week-grid">
+                    ${thisWeekItem('Runs', rangeCopy(targets.runs, 'runs'))}
+                    ${thisWeekItem('Total mileage', rangeCopy(targets.mileage, 'miles'))}
+                    ${thisWeekItem('Zone 2 target', `${targets.zone2.lower}-${targets.zone2.upper}% of runs`)}
+                    ${thisWeekItem('Long run', rangeCopy(targets.longRun, 'miles'))}
+                  </div>
+                </div>
+                <ul class="focus-actions">
+                  ${plan.actions.map((action) => `<li>${escapeHtml(action)}</li>`).join('')}
+                </ul>
+              </div>
+              ${access.isLocked ? premiumOverlayMarkup() : ''}
+            </div>
           </article>
 
           <article class="focus-goal">
@@ -444,6 +474,72 @@ function renderFocusPage(data) {
 function bindFocusEvents() {
   document.querySelector('[data-action="sync"]')?.addEventListener('click', sync);
   document.querySelector('[data-action="logout"]')?.addEventListener('click', logout);
+  document
+    .querySelector('[data-action="unlock-focus"]')
+    ?.addEventListener('click', showPremiumRecapModal);
+}
+
+function getFocusAccess(data) {
+  const appMode = state.demoMode ? 'demo' : data.appMode || 'live';
+  const isPremium = Boolean(data.isPremium);
+  return {
+    appMode,
+    isPremium,
+    isDemo: appMode === 'demo',
+    isLocked: appMode === 'live' && !isPremium
+  };
+}
+
+function premiumOverlayMarkup() {
+  return `
+    <div class="premium-overlay">
+      <div class="premium-overlay-card">
+        <h3>Unlock your weekly training plan</h3>
+        <p>Get exact runs, mileage, and Zone 2 targets based on your training.</p>
+        <button class="primary-button" data-action="unlock-focus" type="button">Unlock Focus - $5/month</button>
+      </div>
+    </div>
+  `;
+}
+
+function showPremiumRecapModal() {
+  closePremiumRecapModal();
+  document.body.insertAdjacentHTML(
+    'beforeend',
+    `
+      <div class="premium-modal-overlay" data-action="close-premium-recap">
+        <section class="premium-modal" role="dialog" aria-modal="true" aria-label="Unlock Focus">
+          <button class="icon-button" data-action="close-premium-recap-button" type="button" title="Close" aria-label="Close">${icons.close}</button>
+          <span>Focus Premium</span>
+          <h2>Unlock weekly coaching targets</h2>
+          <ul>
+            <li>Weekly run count, mileage, and long-run targets</li>
+            <li>Personalized recommendations from your latest training block</li>
+            <li>Progress tracking that explains what to fix next</li>
+          </ul>
+          <button class="primary-button" data-action="premium-checkout" type="button">Continue to checkout</button>
+        </section>
+      </div>
+    `
+  );
+
+  document
+    .querySelector('[data-action="close-premium-recap"]')
+    ?.addEventListener('click', (event) => {
+      if (event.target.dataset.action === 'close-premium-recap') {
+        closePremiumRecapModal();
+      }
+    });
+  document
+    .querySelector('[data-action="close-premium-recap-button"]')
+    ?.addEventListener('click', closePremiumRecapModal);
+  document.querySelector('[data-action="premium-checkout"]')?.addEventListener('click', () => {
+    showToast('Stripe checkout is ready to wire next.');
+  });
+}
+
+function closePremiumRecapModal() {
+  document.querySelector('.premium-modal-overlay')?.remove();
 }
 
 function getFocus(metrics) {
@@ -471,60 +567,79 @@ function getFocus(metrics) {
   return 'maintain';
 }
 
-function getPlan(focus) {
+function getPlan(focus, targets, status) {
+  const runRange = rangeCopy(targets.runs, 'times');
+  const mileageRange = rangeCopy(targets.mileage, 'miles');
+  const longRunRange = rangeCopy(targets.longRun, 'miles');
+  const increaseRange = rangeCopy(targets.mileageIncrease, 'miles');
   const plans = {
     consistency: {
       title: 'Increase consistency',
       explanation:
-        'Your training volume and frequency have dropped, which limits progress.',
+        'Your fitness is there, but the training rhythm slipped. Rebuild the week first.',
       actions: [
-        'Run 4-5 times per week',
+        `Run ${runRange} this week`,
+        `Keep total mileage between ${mileageRange}`,
+        `Keep the long run between ${longRunRange}`,
         'Avoid gaps longer than 2 days',
-        'Keep most runs easy'
+        `Keep ${targets.zone2.lower}-${targets.zone2.upper}% of runs in Zone 2`
       ],
       goal: 'Return to consistent weekly training'
     },
     aerobic_base: {
       title: 'Build aerobic base',
-      explanation: 'Your efficiency at easy effort is not improving.',
+      explanation: 'Easy effort is not turning into better pace yet. Keep the work controlled.',
       actions: [
-        'Run mostly in Zone 2',
-        'Increase mileage gradually (5-10%)',
-        'Limit hard efforts'
+        `Run ${runRange} this week`,
+        `Hold total mileage between ${mileageRange}`,
+        `Keep ${targets.zone2.lower}-${targets.zone2.upper}% of runs in Zone 2`,
+        `Keep the long run between ${longRunRange}`,
+        'Skip hard efforts this week'
       ],
       goal: 'Improve pace at the same heart rate'
     },
     fatigue: {
       title: 'Reduce fatigue',
-      explanation: 'Your heart rate is rising without pace gains.',
+      explanation: 'Heart rate is rising without pace gains. Absorb the work before adding more.',
       actions: [
-        'Reduce intensity',
-        'Add rest or recovery days',
+        `Run ${runRange} this week`,
+        `Cap total mileage at ${mileageRange}`,
+        `Keep the long run between ${longRunRange}`,
+        'Take 1-2 full recovery days',
         'Avoid back-to-back hard efforts'
       ],
       goal: 'Lower heart rate at the same pace'
     },
     progress: {
       title: 'Keep building',
-      explanation: 'You are improving across key metrics.',
+      explanation: 'You are improving. Add a small amount of volume and keep the easy work easy.',
       actions: [
-        'Maintain your current structure',
-        'Slightly increase volume',
-        'Keep long runs consistent'
+        `Increase weekly mileage by ${increaseRange}`,
+        `Run ${runRange} this week`,
+        `Keep the long run between ${longRunRange}`,
+        `Keep ${targets.zone2.lower}-${targets.zone2.upper}% of runs in Zone 2`
       ],
       goal: 'Continue progression without burnout'
     },
     maintain: {
       title: 'Maintain fitness',
-      explanation: 'Your training is stable but not improving significantly.',
-      actions: ['Stay consistent', 'Add small progression (mileage or pace)'],
+      explanation:
+        status === 'declining'
+          ? 'The trend is soft. Keep the week simple and finish fresh.'
+          : 'Your training is stable. Hold the structure and add one small progression.',
+      actions: [
+        `Run ${runRange} this week`,
+        `Keep total mileage between ${mileageRange}`,
+        `Keep the long run between ${longRunRange}`,
+        'Add one small progression: 10-15 minutes steady or 1 extra easy mile'
+      ],
       goal: 'Move from maintenance to improvement'
     }
   };
   return plans[focus] || plans.maintain;
 }
 
-function getImprovementDiagnosis(metrics, focus, plan) {
+function getImprovementDiagnosis(metrics, focus) {
   const volumeChange = safeMetric(metrics.volume_change_percent);
   const frequencyChange = safeMetric(metrics.run_frequency_change_percent);
   const efficiencyChange = safeMetric(metrics.zone2_efficiency_change_percent);
@@ -556,10 +671,10 @@ function getImprovementDiagnosis(metrics, focus, plan) {
 
   const summaries = {
     improving:
-      'Your pace or Zone 2 efficiency is moving the right way without a heart-rate penalty.',
+      'You are getting more output without paying for it in heart rate.',
     declining:
-      'Your heart rate is rising without pace gains, or efficiency is sliding.',
-    flat: 'Your key signals are stable, but there is not enough movement to call it progress yet.'
+      'Heart rate is up and pace is not better. Treat this as fatigue first.',
+    flat: 'You are holding fitness. This week needs consistency, not hero work.'
   };
 
   return {
@@ -567,7 +682,7 @@ function getImprovementDiagnosis(metrics, focus, plan) {
     label: labels[status],
     summary: summaries[status],
     why: getDiagnosisWhy(metrics, status, focus),
-    fix: getDiagnosisFix(focus, plan)
+    fix: ''
   };
 }
 
@@ -581,54 +696,195 @@ function getDiagnosisWhy(metrics, status, focus) {
   const positives = [];
 
   if (efficiencyChange > 0) {
-    positives.push(`Zone 2 efficiency improved ${percent(efficiencyChange)}`);
+    positives.push(`Zone 2 efficiency improved ${absolutePercent(efficiencyChange)}`);
   }
   if (paceChange < 0) {
-    positives.push(`average pace improved ${absolutePercent(paceChange)}`);
+    positives.push(`pace improved ${absolutePercent(paceChange)}`);
   }
   if (hrChange < 0) {
-    positives.push(`average HR fell ${absolutePercent(hrChange)}`);
+    positives.push(`HR dropped ${absolutePercent(hrChange)}`);
   }
   if (volumeChange < -10) {
     blockers.push(`volume dropped ${absolutePercent(volumeChange)}`);
   }
   if (frequencyChange < -10) {
-    blockers.push(`run frequency dropped ${absolutePercent(frequencyChange)}`);
+    blockers.push(`frequency dropped ${absolutePercent(frequencyChange)}`);
   }
 
   if (status === 'declining') {
-    return `Average HR is ${percent(hrChange)} while pace is ${percent(paceChange)}, which usually points to fatigue or harder effort.`;
+    if (hrChange > 0.5 && paceChange >= 0) {
+      return `HR rose ${absolutePercent(hrChange)} and pace did not improve. Back off intensity and rebuild frequency.`;
+    }
+    if (efficiencyChange < 0 && paceChange > 0) {
+      return `Zone 2 efficiency dropped ${absolutePercent(efficiencyChange)} and pace slowed ${absolutePercent(paceChange)}. Keep the week easy.`;
+    }
+    return 'The trend softened. Rebuild frequency before adding intensity.';
   }
   if (blockers.length > 0 && positives.length > 0) {
-    return `${joinCopy(positives)}, but ${joinCopy(blockers)}. That limits how much progress can stick.`;
+    return `${capitalize(joinCopy(positives))}. ${capitalize(joinCopy(blockers))}, so the limiter is consistency.`;
   }
   if (blockers.length > 0) {
-    return `${capitalize(joinCopy(blockers))} over the last 30 days, so consistency is the limiter.`;
+    return `${capitalize(joinCopy(blockers))}. Run frequency is the first fix.`;
   }
   if (focus === 'aerobic_base') {
-    return `Volume is steady enough, but Zone 2 efficiency is ${percent(efficiencyChange)}, so easy effort is not turning into better pace yet.`;
+    return `Zone 2 efficiency is ${percent(efficiencyChange)}. Easy runs are not producing better pace yet.`;
   }
   if (status === 'improving') {
-    return `${joinCopy(positives)} over the last 30 days, which means the same effort is producing better output.`;
+    return `${capitalize(joinCopy(positives))}. You are producing better output at lower effort.`;
   }
-  return `Your metrics are mostly stable: volume ${percent(volumeChange)}, Zone 2 efficiency ${percent(efficiencyChange)}, and average HR ${percent(hrChange)}.`;
+  return `Volume is ${percent(volumeChange)}, Zone 2 efficiency is ${percent(efficiencyChange)}, and HR is ${percent(hrChange)}. Stable, but not moving yet.`;
 }
 
-function getDiagnosisFix(focus, plan) {
+function getDiagnosisFix(focus, targets) {
+  const runRange = rangeCopy(targets.runs, 'runs');
+  const mileageRange = rangeCopy(targets.mileage, 'miles');
+  const longRunRange = rangeCopy(targets.longRun, 'miles');
   const fixes = {
     consistency:
-      'Run 4-5 times per week, avoid gaps longer than 2 days, and keep most runs in Zone 2.',
+      `Run ${runRange}, keep mileage at ${mileageRange}, and do not miss more than 2 days in a row.`,
     aerobic_base:
-      'Run mostly in Zone 2, build mileage gradually by 5-10%, and limit hard efforts.',
+      `Run ${runRange}, keep ${targets.zone2.lower}-${targets.zone2.upper}% in Zone 2, and hold mileage at ${mileageRange}.`,
     fatigue:
-      'Reduce intensity, add recovery days, and avoid back-to-back hard efforts.',
+      `Run ${runRange}, cap mileage at ${mileageRange}, and take 1-2 recovery days.`,
     progress:
-      'Keep the current structure, slightly increase volume, and protect the long run.',
+      `Add ${rangeCopy(targets.mileageIncrease, 'miles')}, keep the long run ${longRunRange}, and keep ${targets.zone2.lower}-${targets.zone2.upper}% in Zone 2.`,
     maintain:
-      'Stay consistent and add one small progression through mileage or pace.'
+      `Run ${runRange}, keep mileage at ${mileageRange}, and add one small progression.`
   };
 
-  return fixes[focus] || plan.actions.join(', ');
+  return fixes[focus] || fixes.maintain;
+}
+
+function getThisWeekTargets(metrics, focus, status) {
+  const totalMiles = Math.max(0, safeMetric(metrics.total_miles_30d));
+  const totalRuns = Math.max(0, safeMetric(metrics.total_runs_30d));
+  const baseMiles = totalMiles > 0 ? (totalMiles / 30) * 7 : 10;
+  const baseRuns = totalRuns > 0 ? (totalRuns / 30) * 7 : 3;
+  const increase = mileageIncreaseRange(baseMiles);
+  let runs;
+  let mileage;
+
+  if (focus === 'fatigue') {
+    const lower = clamp(Math.floor(baseRuns) - 1, 2, 4);
+    runs = normalizeRange(lower, clamp(Math.round(baseRuns), lower, 5));
+    mileage = normalizeRange(
+      Math.max(4, Math.round(baseMiles * 0.75)),
+      Math.max(5, Math.round(baseMiles * 0.9))
+    );
+  } else if (focus === 'consistency' || status === 'declining') {
+    const lower = clamp(Math.max(3, Math.ceil(baseRuns)), 3, 5);
+    runs = normalizeRange(lower, clamp(lower + 1, lower, 5));
+    mileage = normalizeRange(
+      Math.max(6, Math.round(baseMiles * 0.9)),
+      Math.max(8, Math.round(baseMiles * 1.05))
+    );
+  } else if (focus === 'progress' || status === 'improving') {
+    const lower = clamp(Math.max(3, Math.round(baseRuns)), 3, 5);
+    runs = normalizeRange(lower, clamp(lower + 1, lower, 6));
+    mileage = normalizeRange(
+      Math.round(baseMiles + increase.lower),
+      Math.round(baseMiles + increase.upper)
+    );
+  } else {
+    const lower = clamp(Math.max(3, Math.round(baseRuns)), 3, 5);
+    runs = normalizeRange(lower, clamp(lower + 1, lower, 5));
+    mileage = normalizeRange(
+      Math.max(6, Math.round(baseMiles)),
+      Math.max(8, Math.round(baseMiles + Math.min(3, Math.max(1, baseMiles * 0.08))))
+    );
+  }
+
+  const longRun = longRunRange(mileage, focus);
+
+  return {
+    runs,
+    mileage,
+    mileageIncrease: increase,
+    zone2: {
+      lower: 70,
+      upper: 85
+    },
+    longRun
+  };
+}
+
+function getOneThing(focus, status) {
+  if (focus === 'fatigue') {
+    return 'take one full recovery day before the next hard effort.';
+  }
+  if (status === 'declining' || focus === 'consistency') {
+    return 'hit the run count target, even if every run is short and easy.';
+  }
+  if (status === 'improving') {
+    return 'repeat the structure and keep the easy runs easy.';
+  }
+  if (focus === 'aerobic_base') {
+    return 'keep every run under the top of Zone 2.';
+  }
+  return 'hit the mileage range before chasing pace.';
+}
+
+function thisWeekItem(label, value) {
+  return `
+    <div class="this-week-item">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `;
+}
+
+function mileageIncreaseRange(baseMiles) {
+  if (baseMiles < 10) {
+    return {
+      lower: 1,
+      upper: 2
+    };
+  }
+  if (baseMiles < 20) {
+    return {
+      lower: 2,
+      upper: 3
+    };
+  }
+  return {
+    lower: 2,
+    upper: 4
+  };
+}
+
+function longRunRange(mileage, focus) {
+  const lowerFactor = focus === 'fatigue' ? 0.22 : 0.27;
+  const upperFactor = focus === 'fatigue' ? 0.3 : 0.35;
+  return normalizeRange(
+    Math.max(3, Math.round(mileage.lower * lowerFactor)),
+    Math.max(4, Math.round(mileage.upper * upperFactor))
+  );
+}
+
+function rangeCopy(range, unit) {
+  const lower = compactNumber(range.lower);
+  const upper = compactNumber(range.upper);
+  if (lower === upper) {
+    return `${lower} ${unit}`;
+  }
+  return `${lower}-${upper} ${unit}`;
+}
+
+function normalizeRange(lower, upper) {
+  const safeLower = Math.max(0, Math.round(lower));
+  const safeUpper = Math.max(safeLower, Math.round(upper));
+  return {
+    lower: safeLower,
+    upper: safeUpper
+  };
+}
+
+function compactNumber(value) {
+  return Number.isInteger(value) ? String(value) : formatNumber(value, 1);
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
 }
 
 function safeMetric(value) {
@@ -1484,6 +1740,8 @@ function createDemoDashboard() {
       profile: '',
       location: 'Raleigh, North Carolina'
     },
+    appMode: 'demo',
+    isPremium: false,
     lastSync: {
       completed_at: '2026-05-05T12:00:00Z'
     },

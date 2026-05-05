@@ -38,9 +38,12 @@ export function loadEnv(rootDir) {
 export function getConfig(rootDir) {
   const databasePath = process.env.DATABASE_PATH || './data/running.db';
   const port = Number.parseInt(process.env.PORT || '3000', 10);
+  const appMode = normalizeAppMode(process.env.APP_MODE);
 
   return {
     appName: 'Running Dashboard',
+    appMode,
+    isPremium: process.env.IS_PREMIUM === 'true',
     rootDir,
     port,
     databasePath: path.resolve(rootDir, databasePath),
@@ -57,6 +60,10 @@ export function getConfig(rootDir) {
     },
     browserSetupEnabled: process.env.ALLOW_BROWSER_SETUP !== 'false'
   };
+}
+
+function normalizeAppMode(value) {
+  return value === 'demo' ? 'demo' : 'live';
 }
 
 export function isStravaConfigured(config) {

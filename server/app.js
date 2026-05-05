@@ -93,7 +93,9 @@ async function routeApi(req, res, url) {
       browserSetupAllowed: browserSetupAllowed(config, req),
       credentialsSource: stravaConfigSource(config, db),
       redirectUri: effectiveConfig.strava.redirectUri,
-      databasePath: config.databasePath
+      databasePath: config.databasePath,
+      appMode: config.appMode,
+      isPremium: config.isPremium
     });
     return;
   }
@@ -187,7 +189,11 @@ async function routeApi(req, res, url) {
       return;
     }
 
-    sendJson(res, 200, buildDashboard(db, session.athlete_id));
+    sendJson(res, 200, {
+      ...buildDashboard(db, session.athlete_id),
+      appMode: config.appMode,
+      isPremium: config.isPremium
+    });
     return;
   }
 
