@@ -1,6 +1,8 @@
 const app = document.querySelector('#app');
 const state = {
   dashboard: null,
+  configStatus: null,
+  currentUser: null,
   activeSport: 'run',
   chartMetric: 'distanceMiles',
   toastTimer: null,
@@ -48,6 +50,15 @@ init().catch((error) => {
 });
 
 async function init() {
+  if (window.location.pathname === '/success') {
+    renderCheckoutResult('success');
+    return;
+  }
+  if (window.location.pathname === '/cancel') {
+    renderCheckoutResult('cancel');
+    return;
+  }
+
   const demoPath = window.location.pathname.startsWith('/demo');
   if (demoPath) {
     state.demoMode = true;
@@ -65,10 +76,17 @@ async function init() {
     api('/api/config/status'),
     api('/api/me')
   ]);
+  state.configStatus = configStatus;
+  state.currentUser = me;
 
   if (configStatus.appMode === 'demo') {
     state.demoMode = true;
     loadDemoDashboard();
+    return;
+  }
+
+  if (window.location.pathname === '/billing') {
+    renderBillingPage(me);
     return;
   }
 
@@ -137,6 +155,98 @@ function renderLogin(configStatus, canLogin) {
   if (setupForm) {
     setupForm.addEventListener('submit', saveStravaSetup);
   }
+}
+
+function renderBillingPage(me = { authenticated: false }) {
+  const isPremium = Boolean(me.athlete?.isPremium || state.dashboard?.isPremium);
+  app.innerHTML = `
+    <section class="dashboard billing-page">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">${icons.flame}</div>
+          <div class="brand-text">
+            <strong>Focus Premium</strong>
+            <span>${isPremium ? 'Your plan is active' : 'Upgrade your training'}</span>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <a class="secondary-button topbar-link" href="/">Dashboard</a>
+        </div>
+      </header>
+
+      <main class="dashboard-main billing-main">
+        <section class="billing-hero">
+          <p class="eyebrow">Premium coaching</p>
+          <h1>Upgrade your training</h1>
+          <p>Unlock weekly targets and clear coaching guidance built from your Strava training.</p>
+        </section>
+
+        <section class="billing-grid">
+          <article class="billing-card">
+            <span>Current plan</span>
+            <h2>Free</h2>
+            <strong>$0</strong>
+            <ul>
+              <li>Basic dashboard metrics</li>
+              <li>Recent runs and rides</li>
+              <li>No coaching insights</li>
+            </ul>
+          </article>
+
+          <article class="billing-card premium-plan">
+            <span>Recommended</span>
+            <h2>Focus Premium</h2>
+            <strong>$5/month</strong>
+            <ul>
+              <li>Weekly run targets</li>
+              <li>Personalized coaching insights</li>
+              <li>What to fix next guidance</li>
+            </ul>
+            <button class="primary-button" data-action="checkout" type="button" ${isPremium ? 'disabled' : ''}>
+              ${isPremium ? 'Focus is unlocked' : 'Unlock Focus - $5/month'}
+            </button>
+          </article>
+        </section>
+      </main>
+    </section>
+  `;
+
+  document.querySelector('[data-action="checkout"]')?.addEventListener('click', () => {
+    if (!me.authenticated) {
+      showToast('Sign in with Strava before upgrading.');
+      window.location.href = '/auth/strava';
+      return;
+    }
+    startCheckout();
+  });
+}
+
+function renderCheckoutResult(status) {
+  const success = status === 'success';
+  app.innerHTML = `
+    <section class="dashboard billing-page">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">${success ? icons.flame : icons.close}</div>
+          <div class="brand-text">
+            <strong>${success ? 'Focus Premium' : 'Checkout'}</strong>
+            <span>${success ? 'Subscription started' : 'No subscription changes'}</span>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <a class="secondary-button topbar-link" href="/">Dashboard</a>
+        </div>
+      </header>
+      <main class="dashboard-main billing-main">
+        <section class="billing-hero result-hero">
+          <p class="eyebrow">${success ? 'Success' : 'Canceled'}</p>
+          <h1>${success ? "You're upgraded 🎉" : 'Checkout canceled'}</h1>
+          <p>${success ? 'Your Focus Premium access will unlock after Stripe confirms the subscription.' : 'You can return anytime to unlock weekly coaching targets.'}</p>
+          <a class="primary-button result-button" href="${success ? '/focus' : '/billing'}">${success ? 'Open Focus' : 'Return to billing'}</a>
+        </section>
+      </main>
+    </section>
+  `;
 }
 
 function setupMarkup(configStatus) {
@@ -228,6 +338,10 @@ function renderCurrentPage() {
     renderFocusPage(state.dashboard);
     return;
   }
+  if (window.location.pathname === '/billing') {
+    renderBillingPage(state.currentUser || { authenticated: true });
+    return;
+  }
   renderDashboard(state.dashboard);
 }
 
@@ -240,7 +354,8 @@ function renderDashboard(data) {
   const syncLabel = data.lastSync?.completed_at
     ? `Last sync ${formatDateTime(data.lastSync.completed_at)}`
     : 'Ready to sync';
-  const focusHref = state.demoMode ? '/demo/focus' : '/focus';
+  const focusHref =
+    state.demoMode ? '/demo/focus' : data.appMode === 'demo' || data.isPremium ? '/focus' : '/billing';
   const accountActions = state.demoMode
     ? '<a class="secondary-button topbar-link" href="/">Connect Strava</a>'
     : `<button class="secondary-button" data-action="sync">${icons.sync}<span>Sync</span></button>
@@ -475,8 +590,10 @@ function bindFocusEvents() {
   document.querySelector('[data-action="sync"]')?.addEventListener('click', sync);
   document.querySelector('[data-action="logout"]')?.addEventListener('click', logout);
   document
-    .querySelector('[data-action="unlock-focus"]')
-    ?.addEventListener('click', showPremiumRecapModal);
+    .querySelector('[data-action="upgrade-focus"]')
+    ?.addEventListener('click', () => {
+      window.location.href = '/billing';
+    });
 }
 
 function getFocusAccess(data) {
@@ -494,9 +611,9 @@ function premiumOverlayMarkup() {
   return `
     <div class="premium-overlay">
       <div class="premium-overlay-card">
-        <h3>Unlock your weekly training plan</h3>
+        <h3>Unlock weekly coaching targets</h3>
         <p>Get exact runs, mileage, and Zone 2 targets based on your training.</p>
-        <button class="primary-button" data-action="unlock-focus" type="button">Unlock Focus - $5/month</button>
+        <button class="primary-button" data-action="upgrade-focus" type="button">Upgrade now</button>
       </div>
     </div>
   `;
@@ -534,7 +651,7 @@ function showPremiumRecapModal() {
     .querySelector('[data-action="close-premium-recap-button"]')
     ?.addEventListener('click', closePremiumRecapModal);
   document.querySelector('[data-action="premium-checkout"]')?.addEventListener('click', () => {
-    showToast('Stripe checkout is ready to wire next.');
+    startCheckout();
   });
 }
 
@@ -948,6 +1065,28 @@ async function sync() {
     showToast(error.message);
   } finally {
     button.disabled = false;
+  }
+}
+
+async function startCheckout() {
+  const button = document.querySelector('[data-action="checkout"], [data-action="premium-checkout"]');
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Opening Stripe...';
+  }
+
+  try {
+    const result = await api('/api/checkout', { method: 'POST' });
+    if (!result.url) {
+      throw new Error('Stripe did not return a checkout URL.');
+    }
+    window.location.href = result.url;
+  } catch (error) {
+    showToast(error.message);
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Unlock Focus - $5/month';
+    }
   }
 }
 

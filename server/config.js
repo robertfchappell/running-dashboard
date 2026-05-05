@@ -43,7 +43,6 @@ export function getConfig(rootDir) {
   return {
     appName: 'Running Dashboard',
     appMode,
-    isPremium: process.env.IS_PREMIUM === 'true',
     rootDir,
     port,
     databasePath: path.resolve(rootDir, databasePath),
@@ -57,6 +56,14 @@ export function getConfig(rootDir) {
         1,
         Number.parseInt(process.env.STRAVA_SYNC_PAGES || '3', 10)
       )
+    },
+    stripe: {
+      secretKey: process.env.STRIPE_SECRET_KEY || '',
+      publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || '',
+      priceId: process.env.STRIPE_PRICE_ID || '',
+      webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
+      successUrl: 'https://run.mychappell.com/success',
+      cancelUrl: 'https://run.mychappell.com/cancel'
     },
     browserSetupEnabled: process.env.ALLOW_BROWSER_SETUP !== 'false'
   };

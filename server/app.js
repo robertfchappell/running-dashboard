@@ -1,6 +1,7 @@
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Stripe from 'stripe';
 import {
   browserSetupAllowed,
   getEffectiveConfig,
@@ -10,7 +11,7 @@ import {
   saveStravaBrowserSettings,
   stravaConfigSource
 } from './config.js';
-import { openDatabase } from './db.js';
+import { openDatabase, statements } from './db.js';
 import {
   clearOauthStateCookie,
   cleanupExpiredAuthData,
@@ -30,6 +31,7 @@ import {
 import {
   notFound,
   readRequestBody,
+  readRequestBuffer,
   redirect,
   sendError,
   sendJson,
@@ -46,6 +48,7 @@ loadEnv(rootDir);
 const config = getConfig(rootDir);
 const db = openDatabase(config.databasePath);
 const publicDir = path.join(rootDir, 'public');
+let stripeClient = null;
 
 cleanupExpiredAuthData(db);
 
@@ -60,6 +63,9 @@ const server = http.createServer(async (req, res) => {
 
     if (
       url.pathname === '/focus' ||
+      url.pathname === '/billing' ||
+      url.pathname === '/success' ||
+      url.pathname === '/cancel' ||
       url.pathname === '/demo' ||
       url.pathname === '/demo/' ||
       url.pathname === '/demo/focus' ||
@@ -95,7 +101,7 @@ async function routeApi(req, res, url) {
       redirectUri: effectiveConfig.strava.redirectUri,
       databasePath: config.databasePath,
       appMode: config.appMode,
-      isPremium: config.isPremium
+      stripePublishableKey: config.stripe.publishableKey
     });
     return;
   }
@@ -176,9 +182,62 @@ async function routeApi(req, res, url) {
         name:
           [session.firstname, session.lastname].filter(Boolean).join(' ') ||
           'Runner',
-        profile: session.profile
+        profile: session.profile,
+        isPremium: Boolean(session.is_premium)
       }
     });
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/checkout') {
+    const session = requireSession(db, req);
+    if (!session) {
+      sendError(res, 401, 'Not authenticated.');
+      return;
+    }
+
+    if (!config.stripe.secretKey || !config.stripe.priceId) {
+      sendError(res, 500, 'Stripe checkout is not configured.');
+      return;
+    }
+
+    try {
+      const checkoutOptions = {
+        mode: 'subscription',
+        line_items: [
+          {
+            price: config.stripe.priceId,
+            quantity: 1
+          }
+        ],
+        success_url: config.stripe.successUrl,
+        cancel_url: config.stripe.cancelUrl,
+        metadata: {
+          athlete_id: String(session.athlete_id)
+        },
+        subscription_data: {
+          metadata: {
+            athlete_id: String(session.athlete_id)
+          }
+        }
+      };
+      if (session.stripe_customer_id) {
+        checkoutOptions.customer = session.stripe_customer_id;
+      }
+
+      const checkout = await getStripe().checkout.sessions.create(checkoutOptions);
+
+      sendJson(res, 200, {
+        url: checkout.url
+      });
+    } catch (error) {
+      sendError(res, 500, 'Could not create Stripe checkout session.', error.message);
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/webhook') {
+    await handleStripeWebhook(req, res);
     return;
   }
 
@@ -189,11 +248,7 @@ async function routeApi(req, res, url) {
       return;
     }
 
-    sendJson(res, 200, {
-      ...buildDashboard(db, session.athlete_id),
-      appMode: config.appMode,
-      isPremium: config.isPremium
-    });
+    sendJson(res, 200, decorateDashboard(buildDashboard(db, session.athlete_id), session));
     return;
   }
 
@@ -297,6 +352,71 @@ async function handleStravaCallback(req, res, url) {
   redirect(res, '/', {
     'set-cookie': [session.header, clearOauthStateCookie()]
   });
+}
+
+function decorateDashboard(dashboard, session) {
+  return {
+    ...dashboard,
+    appMode: config.appMode,
+    isPremium: Boolean(session.is_premium || dashboard.athlete?.isPremium)
+  };
+}
+
+function getStripe() {
+  if (!stripeClient) {
+    stripeClient = new Stripe(config.stripe.secretKey);
+  }
+  return stripeClient;
+}
+
+async function handleStripeWebhook(req, res) {
+  if (!config.stripe.secretKey || !config.stripe.webhookSecret) {
+    sendError(res, 500, 'Stripe webhook is not configured.');
+    return;
+  }
+
+  const signature = req.headers['stripe-signature'];
+  if (!signature) {
+    sendError(res, 400, 'Missing Stripe signature.');
+    return;
+  }
+
+  let event;
+  try {
+    const rawBody = await readRequestBuffer(req);
+    event = getStripe().webhooks.constructEvent(
+      rawBody,
+      signature,
+      config.stripe.webhookSecret
+    );
+  } catch (error) {
+    sendError(res, 400, 'Invalid Stripe webhook signature.', error.message);
+    return;
+  }
+
+  if (event.type === 'checkout.session.completed') {
+    const checkoutSession = event.data.object;
+    const athleteId = Number(checkoutSession.metadata?.athlete_id);
+    if (Number.isFinite(athleteId)) {
+      statements.updateAthleteBilling(db).run(
+        1,
+        stripeId(checkoutSession.customer),
+        stripeId(checkoutSession.subscription),
+        athleteId
+      );
+    }
+  }
+
+  sendJson(res, 200, {
+    received: true
+  });
+}
+
+function stripeId(value) {
+  if (!value) {
+    return null;
+  }
+  return typeof value === 'string' ? value : value.id || null;
 }
 
 async function readJsonBody(req) {

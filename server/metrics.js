@@ -704,6 +704,9 @@ function formatAthlete(athlete) {
       'Runner',
     firstname: athlete.firstname,
     profile: athlete.profile,
+    isPremium: Boolean(athlete.is_premium),
+    stripeCustomerId: athlete.stripe_customer_id || null,
+    stripeSubscriptionId: athlete.stripe_subscription_id || null,
     location: [athlete.city, athlete.state, athlete.country]
       .filter(Boolean)
       .join(', ')

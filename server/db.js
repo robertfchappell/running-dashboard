@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS athletes (
   state TEXT,
   country TEXT,
   sex TEXT,
+  is_premium INTEGER NOT NULL DEFAULT 0,
+  stripe_customer_id TEXT,
+  stripe_subscription_id TEXT,
   raw_json TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -140,22 +143,34 @@ CREATE TABLE IF NOT EXISTS sync_runs (
 `;
 
 function migrateDatabase(db) {
-  const columns = new Set(
+  const activityColumns = new Set(
     db.prepare('PRAGMA table_info(activities)').all().map((column) => column.name)
   );
-  const addColumn = (name, definition) => {
-    if (!columns.has(name)) {
+  const athleteColumns = new Set(
+    db.prepare('PRAGMA table_info(athletes)').all().map((column) => column.name)
+  );
+  const addActivityColumn = (name, definition) => {
+    if (!activityColumns.has(name)) {
       db.exec(`ALTER TABLE activities ADD COLUMN ${name} ${definition}`);
     }
   };
+  const addAthleteColumn = (name, definition) => {
+    if (!athleteColumns.has(name)) {
+      db.exec(`ALTER TABLE athletes ADD COLUMN ${name} ${definition}`);
+    }
+  };
 
-  addColumn('average_watts', 'REAL');
-  addColumn('max_watts', 'REAL');
-  addColumn('kilojoules', 'REAL');
-  addColumn('device_watts', 'INTEGER NOT NULL DEFAULT 0');
-  addColumn('is_ride', 'INTEGER NOT NULL DEFAULT 0');
-  addColumn('has_heartrate', 'INTEGER NOT NULL DEFAULT 0');
-  addColumn('summary_polyline', 'TEXT');
+  addAthleteColumn('is_premium', 'INTEGER NOT NULL DEFAULT 0');
+  addAthleteColumn('stripe_customer_id', 'TEXT');
+  addAthleteColumn('stripe_subscription_id', 'TEXT');
+
+  addActivityColumn('average_watts', 'REAL');
+  addActivityColumn('max_watts', 'REAL');
+  addActivityColumn('kilojoules', 'REAL');
+  addActivityColumn('device_watts', 'INTEGER NOT NULL DEFAULT 0');
+  addActivityColumn('is_ride', 'INTEGER NOT NULL DEFAULT 0');
+  addActivityColumn('has_heartrate', 'INTEGER NOT NULL DEFAULT 0');
+  addActivityColumn('summary_polyline', 'TEXT');
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_activities_athlete_ride_start
@@ -264,7 +279,13 @@ export const statements = {
     `),
   findSession: (db) =>
     db.prepare(`
-      SELECT sessions.*, athletes.firstname, athletes.lastname, athletes.profile
+      SELECT sessions.*,
+             athletes.firstname,
+             athletes.lastname,
+             athletes.profile,
+             athletes.is_premium,
+             athletes.stripe_customer_id,
+             athletes.stripe_subscription_id
       FROM sessions
       JOIN athletes ON athletes.id = sessions.athlete_id
       WHERE sessions.id = ?
@@ -462,5 +483,14 @@ export const statements = {
   athleteById: (db) =>
     db.prepare(`
       SELECT * FROM athletes WHERE id = ?
+    `),
+  updateAthleteBilling: (db) =>
+    db.prepare(`
+      UPDATE athletes
+      SET is_premium = ?,
+          stripe_customer_id = ?,
+          stripe_subscription_id = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
     `)
 };

@@ -130,3 +130,19 @@ export function readRequestBody(req) {
     req.on('error', reject);
   });
 }
+
+export function readRequestBuffer(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (chunk) => {
+      chunks.push(chunk);
+      size += chunk.length;
+      if (size > 1_000_000) {
+        req.destroy(new Error('Request body too large'));
+      }
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
