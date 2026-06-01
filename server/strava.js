@@ -26,7 +26,7 @@ export function buildAuthorizationUrl(config, state) {
   url.searchParams.set('redirect_uri', config.strava.redirectUri);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('approval_prompt', 'auto');
-  url.searchParams.set('scope', 'read,activity:read_all');
+  url.searchParams.set('scope', 'read,activity:read_all,profile:read_all');
   url.searchParams.set('state', state);
   return url.toString();
 }
@@ -119,15 +119,41 @@ export async function getValidAccessToken(db, config, athleteId) {
   return refreshed.access_token;
 }
 
+async function refreshSavedAccessToken(db, config, token) {
+  const refreshed = await refreshAccessToken(config, token.refresh_token);
+  statements.upsertToken(db).run(
+    token.athlete_id,
+    refreshed.access_token,
+    refreshed.refresh_token,
+    refreshed.expires_at,
+    token.scope || ''
+  );
+  return refreshed.access_token;
+}
+
 export async function syncStravaActivities(db, config, athleteId) {
   const syncRun = statements.createSyncRun(db).run(athleteId);
   const syncRunId = syncRun.lastInsertRowid;
   let activityCount = 0;
 
   try {
-    const accessToken = await getValidAccessToken(db, config, athleteId);
+    let accessToken = await getValidAccessToken(db, config, athleteId);
+
     for (let page = 1; page <= config.strava.syncPages; page += 1) {
-      const activities = await fetchAthleteActivities(accessToken, page, 100);
+      let activities;
+      try {
+        activities = await fetchAthleteActivities(accessToken, page, 100);
+      } catch (error) {
+        if (!isInvalidAccessTokenError(error)) {
+          throw error;
+        }
+        const token = statements.findToken(db).get(athleteId);
+        if (!token) {
+          throw error;
+        }
+        accessToken = await refreshSavedAccessToken(db, config, token);
+        activities = await fetchAthleteActivities(accessToken, page, 100);
+      }
       if (activities.length === 0) {
         break;
       }
@@ -262,19 +288,7 @@ async function fetchAthleteActivities(accessToken, page, perPage) {
   url.searchParams.set('page', String(page));
   url.searchParams.set('per_page', String(perPage));
 
-  const response = await fetch(url, {
-    headers: {
-      authorization: `Bearer ${accessToken}`
-    }
-  });
-  const json = await parseStravaResponse(response);
-  if (!response.ok) {
-    throw new Error(
-      json?.message ||
-        json?.error ||
-        `Strava activities request failed: ${response.status}`
-    );
-  }
+  const json = await fetchStravaJson(url, accessToken, 'Strava activities');
   return Array.isArray(json) ? json : [];
 }
 
@@ -282,20 +296,7 @@ async function fetchActivityDetail(accessToken, activityId) {
   const url = new URL(`${STRAVA_API_BASE}/activities/${activityId}`);
   url.searchParams.set('include_all_efforts', 'false');
 
-  const response = await fetch(url, {
-    headers: {
-      authorization: `Bearer ${accessToken}`
-    }
-  });
-  const json = await parseStravaResponse(response);
-  if (!response.ok) {
-    throw new Error(
-      json?.message ||
-        json?.error ||
-        `Strava activity detail request failed: ${response.status}`
-    );
-  }
-  return json || {};
+  return (await fetchStravaJson(url, accessToken, 'Strava activity detail')) || {};
 }
 
 async function fetchActivityStreams(accessToken, activityId) {
@@ -318,20 +319,60 @@ async function fetchActivityStreams(accessToken, activityId) {
   );
   url.searchParams.set('key_by_type', 'true');
 
-  const response = await fetch(url, {
-    headers: {
-      authorization: `Bearer ${accessToken}`
+  return (await fetchStravaJson(url, accessToken, 'Strava activity streams')) || {};
+}
+
+async function fetchStravaJson(url, accessToken, label, retries = 2) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const response = await fetch(url, {
+      headers: {
+        authorization: `Bearer ${accessToken}`
+      }
+    });
+    const json = await parseStravaResponse(response);
+    if (response.ok) {
+      return json;
     }
-  });
-  const json = await parseStravaResponse(response);
-  if (!response.ok) {
-    throw new Error(
-      json?.message ||
-        json?.error ||
-        `Strava activity stream request failed: ${response.status}`
-    );
+
+    const error = stravaApiError(label, response.status, json);
+    lastError = error;
+    if (isTransientStravaError(error) && attempt < retries) {
+      await delay(600 * 2 ** attempt);
+      continue;
+    }
+    throw error;
   }
-  return json || {};
+  throw lastError;
+}
+
+function stravaApiError(label, statusCode, body) {
+  const message =
+    statusCode >= 500
+      ? `${label} is currently returning ${statusCode} from Strava. This is usually temporary; try syncing again in a few minutes.`
+      : `${label} request failed with status ${statusCode}: ${JSON.stringify(body)}`;
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.body = body;
+  return error;
+}
+
+function isTransientStravaError(error) {
+  return error.statusCode === 500 || error.statusCode === 502 || error.statusCode === 503 || error.statusCode === 504;
+}
+
+function isInvalidAccessTokenError(error) {
+  return (
+    error.statusCode === 401 &&
+    Array.isArray(error.body?.errors) &&
+    error.body.errors.some(
+      (item) => item.field === 'access_token' && item.code === 'invalid'
+    )
+  );
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function parseStravaResponse(response) {

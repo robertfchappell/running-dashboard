@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS athletes (
   is_premium INTEGER NOT NULL DEFAULT 0,
   stripe_customer_id TEXT,
   stripe_subscription_id TEXT,
+  stripe_subscription_status TEXT,
+  stripe_cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
+  stripe_current_period_end INTEGER,
   raw_json TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -163,6 +166,9 @@ function migrateDatabase(db) {
   addAthleteColumn('is_premium', 'INTEGER NOT NULL DEFAULT 0');
   addAthleteColumn('stripe_customer_id', 'TEXT');
   addAthleteColumn('stripe_subscription_id', 'TEXT');
+  addAthleteColumn('stripe_subscription_status', 'TEXT');
+  addAthleteColumn('stripe_cancel_at_period_end', 'INTEGER NOT NULL DEFAULT 0');
+  addAthleteColumn('stripe_current_period_end', 'INTEGER');
 
   addActivityColumn('average_watts', 'REAL');
   addActivityColumn('max_watts', 'REAL');
@@ -285,7 +291,10 @@ export const statements = {
              athletes.profile,
              athletes.is_premium,
              athletes.stripe_customer_id,
-             athletes.stripe_subscription_id
+             athletes.stripe_subscription_id,
+             athletes.stripe_subscription_status,
+             athletes.stripe_cancel_at_period_end,
+             athletes.stripe_current_period_end
       FROM sessions
       JOIN athletes ON athletes.id = sessions.athlete_id
       WHERE sessions.id = ?
@@ -490,7 +499,21 @@ export const statements = {
       SET is_premium = ?,
           stripe_customer_id = ?,
           stripe_subscription_id = ?,
+          stripe_subscription_status = ?,
+          stripe_cancel_at_period_end = ?,
+          stripe_current_period_end = ?,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
+    `),
+  updateAthleteBillingBySubscription: (db) =>
+    db.prepare(`
+      UPDATE athletes
+      SET is_premium = ?,
+          stripe_customer_id = COALESCE(?, stripe_customer_id),
+          stripe_subscription_status = ?,
+          stripe_cancel_at_period_end = ?,
+          stripe_current_period_end = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE stripe_subscription_id = ?
     `)
 };

@@ -877,6 +877,28 @@ button {
   box-shadow: var(--shadow);
 }
 
+.billing-actions {
+  display: grid;
+  gap: 12px;
+}
+
+.billing-secondary-link {
+  width: 100%;
+  text-decoration: none;
+}
+
+.danger-button {
+  width: 100%;
+  color: var(--red);
+  background: rgba(194, 65, 74, 0.1);
+  border: 1px solid rgba(194, 65, 74, 0.18);
+}
+
+.danger-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
 .result-hero {
   display: flex;
   min-height: 520px;

@@ -183,7 +183,10 @@ async function routeApi(req, res, url) {
           [session.firstname, session.lastname].filter(Boolean).join(' ') ||
           'Runner',
         profile: session.profile,
-        isPremium: Boolean(session.is_premium)
+        isPremium: Boolean(session.is_premium),
+        stripeSubscriptionStatus: session.stripe_subscription_status || null,
+        stripeCancelAtPeriodEnd: Boolean(session.stripe_cancel_at_period_end),
+        stripeCurrentPeriodEnd: session.stripe_current_period_end || null
       }
     });
     return;
@@ -232,6 +235,69 @@ async function routeApi(req, res, url) {
       });
     } catch (error) {
       sendError(res, 500, 'Could not create Stripe checkout session.', error.message);
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/billing-portal') {
+    const session = requireSession(db, req);
+    if (!session) {
+      sendError(res, 401, 'Not authenticated.');
+      return;
+    }
+
+    if (!config.stripe.secretKey) {
+      sendError(res, 500, 'Stripe billing portal is not configured.');
+      return;
+    }
+
+    if (!session.stripe_customer_id) {
+      sendError(res, 400, 'No Stripe customer is linked to this athlete yet.');
+      return;
+    }
+
+    try {
+      const portal = await getStripe().billingPortal.sessions.create({
+        customer: session.stripe_customer_id,
+        return_url: config.stripe.portalReturnUrl
+      });
+      sendJson(res, 200, {
+        url: portal.url
+      });
+    } catch (error) {
+      sendError(res, 500, 'Could not open Stripe billing portal.', error.message);
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/cancel-subscription') {
+    const session = requireSession(db, req);
+    if (!session) {
+      sendError(res, 401, 'Not authenticated.');
+      return;
+    }
+
+    if (!config.stripe.secretKey) {
+      sendError(res, 500, 'Stripe subscriptions are not configured.');
+      return;
+    }
+
+    if (!session.stripe_subscription_id) {
+      sendError(res, 400, 'No active Stripe subscription is linked to this athlete.');
+      return;
+    }
+
+    try {
+      const subscription = await getStripe().subscriptions.update(
+        session.stripe_subscription_id,
+        {
+          cancel_at_period_end: true
+        }
+      );
+      updateBillingFromSubscription(subscription, session.athlete_id);
+      sendJson(res, 200, subscriptionBillingState(subscription));
+    } catch (error) {
+      sendError(res, 500, 'Could not cancel Stripe subscription.', error.message);
     }
     return;
   }
@@ -299,12 +365,16 @@ async function routeApi(req, res, url) {
       return;
     }
 
-    const result = await syncStravaActivities(
-      db,
-      getEffectiveConfig(config, db),
-      session.athlete_id
-    );
-    sendJson(res, 200, result);
+    try {
+      const result = await syncStravaActivities(
+        db,
+        getEffectiveConfig(config, db),
+        session.athlete_id
+      );
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendError(res, error.statusCode || 500, error.message);
+    }
     return;
   }
 
@@ -358,7 +428,12 @@ function decorateDashboard(dashboard, session) {
   return {
     ...dashboard,
     appMode: config.appMode,
-    isPremium: Boolean(session.is_premium || dashboard.athlete?.isPremium)
+    isPremium: Boolean(session.is_premium || dashboard.athlete?.isPremium),
+    billing: {
+      subscriptionStatus: session.stripe_subscription_status || null,
+      cancelAtPeriodEnd: Boolean(session.stripe_cancel_at_period_end),
+      currentPeriodEnd: session.stripe_current_period_end || null
+    }
   };
 }
 
@@ -395,21 +470,83 @@ async function handleStripeWebhook(req, res) {
   }
 
   if (event.type === 'checkout.session.completed') {
-    const checkoutSession = event.data.object;
-    const athleteId = Number(checkoutSession.metadata?.athlete_id);
-    if (Number.isFinite(athleteId)) {
-      statements.updateAthleteBilling(db).run(
-        1,
-        stripeId(checkoutSession.customer),
-        stripeId(checkoutSession.subscription),
-        athleteId
-      );
-    }
+    handleCheckoutCompleted(event.data.object);
+  }
+
+  if (
+    event.type === 'customer.subscription.updated' ||
+    event.type === 'customer.subscription.deleted'
+  ) {
+    handleSubscriptionChanged(event.data.object);
   }
 
   sendJson(res, 200, {
     received: true
   });
+}
+
+function handleCheckoutCompleted(checkoutSession) {
+  const athleteId = Number(checkoutSession.metadata?.athlete_id);
+  if (!Number.isFinite(athleteId)) {
+    return;
+  }
+
+  statements.updateAthleteBilling(db).run(
+    1,
+    stripeId(checkoutSession.customer),
+    stripeId(checkoutSession.subscription),
+    'active',
+    0,
+    null,
+    athleteId
+  );
+}
+
+function handleSubscriptionChanged(subscription) {
+  const subscriptionId = stripeId(subscription);
+  const customerId = stripeId(subscription.customer);
+  const athleteId = Number(subscription.metadata?.athlete_id);
+  if (Number.isFinite(athleteId)) {
+    updateBillingFromSubscription(subscription, athleteId);
+    return;
+  }
+
+  if (subscriptionId) {
+    statements.updateAthleteBillingBySubscription(db).run(
+      subscriptionIsPremium(subscription) ? 1 : 0,
+      customerId,
+      subscription.status || null,
+      subscription.cancel_at_period_end ? 1 : 0,
+      subscription.current_period_end || null,
+      subscriptionId
+    );
+  }
+}
+
+function updateBillingFromSubscription(subscription, athleteId) {
+  statements.updateAthleteBilling(db).run(
+    subscriptionIsPremium(subscription) ? 1 : 0,
+    stripeId(subscription.customer),
+    stripeId(subscription),
+    subscription.status || null,
+    subscription.cancel_at_period_end ? 1 : 0,
+    subscription.current_period_end || null,
+    athleteId
+  );
+}
+
+function subscriptionIsPremium(subscription) {
+  return ['active', 'trialing'].includes(subscription.status);
+}
+
+function subscriptionBillingState(subscription) {
+  return {
+    ok: true,
+    isPremium: subscriptionIsPremium(subscription),
+    subscriptionStatus: subscription.status || null,
+    cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
+    currentPeriodEnd: subscription.current_period_end || null
+  };
 }
 
 function stripeId(value) {

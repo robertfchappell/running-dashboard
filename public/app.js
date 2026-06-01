@@ -159,6 +159,12 @@ function renderLogin(configStatus, canLogin) {
 
 function renderBillingPage(me = { authenticated: false }) {
   const isPremium = Boolean(me.athlete?.isPremium || state.dashboard?.isPremium);
+  const billing = getBillingState(me);
+  const planLabel = isPremium ? 'Active plan' : 'Recommended';
+  const cancelCopy =
+    billing.cancelAtPeriodEnd && billing.currentPeriodEnd
+      ? `Cancellation scheduled for ${formatUnixDate(billing.currentPeriodEnd)}`
+      : 'Your plan is active';
   app.innerHTML = `
     <section class="dashboard billing-page">
       <header class="topbar">
@@ -166,7 +172,7 @@ function renderBillingPage(me = { authenticated: false }) {
           <div class="brand-mark">${icons.flame}</div>
           <div class="brand-text">
             <strong>Focus Premium</strong>
-            <span>${isPremium ? 'Your plan is active' : 'Upgrade your training'}</span>
+            <span>${isPremium ? escapeHtml(cancelCopy) : 'Upgrade your training'}</span>
           </div>
         </div>
         <div class="topbar-actions">
@@ -194,17 +200,27 @@ function renderBillingPage(me = { authenticated: false }) {
           </article>
 
           <article class="billing-card premium-plan">
-            <span>Recommended</span>
+            <span>${escapeHtml(planLabel)}</span>
             <h2>Focus Premium</h2>
             <strong>$5/month</strong>
             <ul>
               <li>Weekly run targets</li>
               <li>Personalized coaching insights</li>
               <li>What to fix next guidance</li>
+              ${isPremium ? '<li>Update payment method and invoices through Stripe</li>' : ''}
+              ${billing.cancelAtPeriodEnd ? `<li>Cancellation scheduled for ${escapeHtml(formatUnixDate(billing.currentPeriodEnd))}</li>` : ''}
             </ul>
-            <button class="primary-button" data-action="checkout" type="button" ${isPremium ? 'disabled' : ''}>
-              ${isPremium ? 'Focus is unlocked' : 'Unlock Focus - $5/month'}
-            </button>
+            ${
+              isPremium
+                ? `<div class="billing-actions">
+                    <button class="primary-button" data-action="billing-portal" type="button">Manage payment method</button>
+                    <button class="secondary-button danger-button" data-action="cancel-subscription" type="button" ${billing.cancelAtPeriodEnd ? 'disabled' : ''}>
+                      ${billing.cancelAtPeriodEnd ? 'Cancellation scheduled' : 'Cancel subscription'}
+                    </button>
+                    <a class="secondary-button billing-secondary-link" href="/focus">Open Focus</a>
+                  </div>`
+                : `<button class="primary-button" data-action="checkout" type="button">Unlock Focus - $5/month</button>`
+            }
           </article>
         </section>
       </main>
@@ -218,6 +234,22 @@ function renderBillingPage(me = { authenticated: false }) {
       return;
     }
     startCheckout();
+  });
+  document.querySelector('[data-action="billing-portal"]')?.addEventListener('click', () => {
+    if (!me.authenticated) {
+      showToast('Sign in with Strava before managing billing.');
+      window.location.href = '/auth/strava';
+      return;
+    }
+    openBillingPortal();
+  });
+  document.querySelector('[data-action="cancel-subscription"]')?.addEventListener('click', () => {
+    if (!me.authenticated) {
+      showToast('Sign in with Strava before managing billing.');
+      window.location.href = '/auth/strava';
+      return;
+    }
+    cancelSubscription();
   });
 }
 
@@ -247,6 +279,20 @@ function renderCheckoutResult(status) {
       </main>
     </section>
   `;
+}
+
+function getBillingState(me) {
+  const athlete = me.athlete || {};
+  const dashboardBilling = state.dashboard?.billing || {};
+  return {
+    subscriptionStatus:
+      athlete.stripeSubscriptionStatus || dashboardBilling.subscriptionStatus || null,
+    cancelAtPeriodEnd: Boolean(
+      athlete.stripeCancelAtPeriodEnd || dashboardBilling.cancelAtPeriodEnd
+    ),
+    currentPeriodEnd:
+      athlete.stripeCurrentPeriodEnd || dashboardBilling.currentPeriodEnd || null
+  };
 }
 
 function setupMarkup(configStatus) {
@@ -376,6 +422,7 @@ function renderDashboard(data) {
             ${sportTab('ride', data.sports.ride.totalSaved)}
           </div>
           <a class="secondary-button topbar-link" href="${focusHref}">Focus</a>
+          ${state.demoMode ? '' : '<a class="secondary-button topbar-link" href="/billing">Billing</a>'}
           ${accountActions}
         </div>
       </header>
@@ -505,6 +552,7 @@ function renderFocusPage(data) {
           </div>
         </div>
         <div class="topbar-actions">
+          ${state.demoMode ? '' : '<a class="secondary-button topbar-link" href="/billing">Billing</a>'}
           <a class="secondary-button topbar-link" href="${dashboardHref}">Dashboard</a>
           ${accountActions}
         </div>
@@ -1085,6 +1133,62 @@ async function startCheckout() {
     if (button) {
       button.disabled = false;
       button.textContent = 'Unlock Focus - $5/month';
+    }
+  }
+}
+
+async function openBillingPortal() {
+  const button = document.querySelector('[data-action="billing-portal"]');
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Opening Stripe...';
+  }
+
+  try {
+    const result = await api('/api/billing-portal', { method: 'POST' });
+    if (!result.url) {
+      throw new Error('Stripe did not return a billing portal URL.');
+    }
+    window.location.href = result.url;
+  } catch (error) {
+    showToast(error.message);
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Manage subscription';
+    }
+  }
+}
+
+async function cancelSubscription() {
+  if (
+    !window.confirm(
+      'Cancel Focus Premium at the end of the current billing period? You will keep access until then.'
+    )
+  ) {
+    return;
+  }
+
+  const button = document.querySelector('[data-action="cancel-subscription"]');
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Canceling...';
+  }
+
+  try {
+    const result = await api('/api/cancel-subscription', { method: 'POST' });
+    showToast(
+      result.currentPeriodEnd
+        ? `Cancellation scheduled for ${formatUnixDate(result.currentPeriodEnd)}.`
+        : 'Cancellation scheduled.'
+    );
+    const me = await api('/api/me');
+    state.currentUser = me;
+    renderBillingPage(me);
+  } catch (error) {
+    showToast(error.message);
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Cancel subscription';
     }
   }
 }
@@ -2299,6 +2403,17 @@ function formatDateTime(value) {
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit'
+  });
+}
+
+function formatUnixDate(value) {
+  if (!Number.isFinite(Number(value))) {
+    return 'the end of the billing period';
+  }
+  return new Date(Number(value) * 1000).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
   });
 }
 

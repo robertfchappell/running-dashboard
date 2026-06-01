@@ -707,6 +707,9 @@ function formatAthlete(athlete) {
     isPremium: Boolean(athlete.is_premium),
     stripeCustomerId: athlete.stripe_customer_id || null,
     stripeSubscriptionId: athlete.stripe_subscription_id || null,
+    stripeSubscriptionStatus: athlete.stripe_subscription_status || null,
+    stripeCancelAtPeriodEnd: Boolean(athlete.stripe_cancel_at_period_end),
+    stripeCurrentPeriodEnd: athlete.stripe_current_period_end || null,
     location: [athlete.city, athlete.state, athlete.country]
       .filter(Boolean)
       .join(', ')

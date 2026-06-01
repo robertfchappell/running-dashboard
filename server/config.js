@@ -63,7 +63,10 @@ export function getConfig(rootDir) {
       priceId: process.env.STRIPE_PRICE_ID || '',
       webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
       successUrl: 'https://run.mychappell.com/success',
-      cancelUrl: 'https://run.mychappell.com/cancel'
+      cancelUrl: 'https://run.mychappell.com/cancel',
+      portalReturnUrl:
+        process.env.STRIPE_PORTAL_RETURN_URL ||
+        'https://run.mychappell.com/billing'
     },
     browserSetupEnabled: process.env.ALLOW_BROWSER_SETUP !== 'false'
   };
