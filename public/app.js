@@ -59,6 +59,18 @@ async function init() {
     return;
   }
 
+  if (window.location.pathname === '/privacy' || window.location.pathname === '/demo/privacy') {
+    state.demoMode = window.location.pathname.startsWith('/demo');
+    const [configStatus, me] = await Promise.all([
+      api('/api/config/status'),
+      api('/api/me')
+    ]);
+    state.configStatus = configStatus;
+    state.currentUser = me;
+    renderPrivacyPolicyPage(me);
+    return;
+  }
+
   const demoPath = window.location.pathname.startsWith('/demo');
   if (demoPath) {
     state.demoMode = true;
@@ -109,7 +121,7 @@ async function init() {
 }
 
 function renderStartupError(error) {
-  app.innerHTML = `
+  renderApp(`
     <section class="screen screen-login">
       <div class="login-copy">
         <p class="eyebrow">Strava training metrics</p>
@@ -122,7 +134,7 @@ function renderStartupError(error) {
         <button class="primary-button" data-action="reload-page" type="button">${icons.sync}<span>Refresh dashboard</span></button>
       </div>
     </section>
-  `;
+  `);
 
   document
     .querySelector('[data-action="reload-page"]')
@@ -134,7 +146,7 @@ function isStillLoading() {
 }
 
 function renderLogin(configStatus, canLogin) {
-  app.innerHTML = `
+  renderApp(`
     <section class="screen screen-login">
       <div class="login-copy">
         <p class="eyebrow">Strava running metrics</p>
@@ -146,7 +158,8 @@ function renderLogin(configStatus, canLogin) {
         <p>${canLogin ? 'Your Strava account becomes your login. The app stores your athlete profile, tokens, sessions, and activities in SQLite.' : 'Add your Strava app credentials before using OAuth login.'}</p>
         ${
           canLogin
-            ? `<a class="primary-button" href="/auth/strava">${icons.strava}<span>Continue with Strava</span></a>`
+            ? `<a class="primary-button" href="/auth/strava">${icons.strava}<span>Connect with Strava</span></a>
+              <p class="strava-attribution">Data provided by Strava</p>`
             : setupMarkup(configStatus)
         }
         <div class="login-actions">
@@ -155,7 +168,7 @@ function renderLogin(configStatus, canLogin) {
         </div>
       </div>
     </section>
-  `;
+  `);
 
   const setupForm = document.querySelector('[data-action="save-strava-setup"]');
   if (setupForm) {
@@ -174,7 +187,7 @@ function renderBillingPage(me = { authenticated: false }) {
   const actions = me.authenticated
     ? `<button class="icon-button" data-action="logout" title="Log out" aria-label="Log out">${icons.logout}</button>`
     : `<a class="primary-button topbar-link" href="/auth/strava">${icons.strava}<span>Sign in</span></a>`;
-  app.innerHTML = `
+  renderApp(`
     <section class="dashboard billing-page">
       ${topbarMarkup({
         active: 'billing',
@@ -229,7 +242,7 @@ function renderBillingPage(me = { authenticated: false }) {
         </section>
       </main>
     </section>
-  `;
+  `);
 
   document.querySelector('[data-action="checkout"]')?.addEventListener('click', () => {
     if (!me.authenticated) {
@@ -267,7 +280,7 @@ function renderMethodologyPage(me = { authenticated: false }) {
       : `<a class="secondary-button topbar-link action-link" href="/demo">Demo</a>
           <a class="primary-button topbar-link" href="/auth/strava">${icons.strava}<span>Sign in</span></a>`;
 
-  app.innerHTML = `
+  renderApp(`
     <section class="dashboard methodology-page">
       ${topbarMarkup({
         active: 'signals',
@@ -377,7 +390,7 @@ function renderMethodologyPage(me = { authenticated: false }) {
         </section>
       </main>
     </section>
-  `;
+  `);
 
   document.querySelector('[data-action="logout"]')?.addEventListener('click', logout);
 }
@@ -461,9 +474,57 @@ function navLink(key, label, href, active) {
   `;
 }
 
+function renderApp(content) {
+  app.innerHTML = `${content}${appFooterMarkup()}`;
+}
+
+function appFooterMarkup() {
+  const privacyHref = state.demoMode ? '/demo/privacy' : '/privacy';
+  return `
+    <footer class="app-footer">
+      <span>Powered by Strava</span>
+      <a href="${privacyHref}">Privacy Policy</a>
+    </footer>
+  `;
+}
+
+function renderPrivacyPolicyPage(me = { authenticated: false }) {
+  const isAuthenticated = Boolean(me.authenticated);
+  const actions = state.demoMode
+    ? '<a class="secondary-button topbar-link action-link" href="/">Connect Strava</a>'
+    : isAuthenticated
+      ? `<button class="icon-button" data-action="logout" title="Log out" aria-label="Log out">${icons.logout}</button>`
+      : `<a class="secondary-button topbar-link action-link" href="/demo">Demo</a>
+          <a class="primary-button topbar-link" href="/auth/strava">${icons.strava}<span>Sign in</span></a>`;
+
+  renderApp(`
+    <section class="dashboard privacy-page">
+      ${topbarMarkup({
+        active: 'privacy',
+        icon: icons.heart,
+        brandName: 'Privacy Policy',
+        subtitle: 'Strava API and data use',
+        actions,
+        showBilling: isAuthenticated
+      })}
+      <main class="dashboard-main privacy-main">
+        <section class="privacy-card">
+          <p class="eyebrow">Privacy</p>
+          <h1>Privacy Policy</h1>
+          <p>This application stores your Strava athlete profile, authorized tokens, sessions, and synced activity data so it can show your training dashboard and Focus recommendations.</p>
+          <p>This application uses the Strava API but is not endorsed, certified, or otherwise approved by Strava. Activity, athlete, and performance data displayed within this application are provided through the Strava API with the user's authorization.</p>
+          <p>You can remove access by revoking the app from your Strava account settings.</p>
+        </section>
+      </main>
+    </section>
+  `);
+
+  document.querySelector('[data-action="logout"]')?.addEventListener('click', logout);
+}
+
 function renderCheckoutResult(status) {
   const success = status === 'success';
-  app.innerHTML = `
+  renderApp(`
     <section class="dashboard billing-page">
       ${topbarMarkup({
         active: 'billing',
@@ -481,7 +542,7 @@ function renderCheckoutResult(status) {
         </section>
       </main>
     </section>
-  `;
+  `);
 }
 
 function getBillingState(me) {
@@ -591,6 +652,10 @@ function renderCurrentPage() {
     renderMethodologyPage(state.currentUser || { authenticated: false });
     return;
   }
+  if (window.location.pathname === '/privacy' || window.location.pathname === '/demo/privacy') {
+    renderPrivacyPolicyPage(state.currentUser || { authenticated: false });
+    return;
+  }
   if (window.location.pathname === '/billing') {
     renderBillingPage(state.currentUser || { authenticated: true });
     return;
@@ -612,7 +677,7 @@ function renderDashboard(data) {
     : `<button class="secondary-button" data-action="sync">${icons.sync}<span>Sync</span></button>
           <button class="icon-button" data-action="logout" title="Log out" aria-label="Log out">${icons.logout}</button>`;
 
-  app.innerHTML = `
+  renderApp(`
     <section class="dashboard">
       ${topbarMarkup({
         active: 'dashboard',
@@ -714,7 +779,7 @@ function renderDashboard(data) {
         </section>
       </main>
     </section>
-  `;
+  `);
 
   bindDashboardEvents();
   drawWeeklyChart();
@@ -741,7 +806,7 @@ function renderFocusPage(data) {
     : `<button class="secondary-button" data-action="sync">${icons.sync}<span>Sync</span></button>
           <button class="icon-button" data-action="logout" title="Log out" aria-label="Log out">${icons.logout}</button>`;
 
-  app.innerHTML = `
+  renderApp(`
     <section class="dashboard focus-page">
       ${topbarMarkup({
         active: 'focus',
@@ -821,7 +886,7 @@ function renderFocusPage(data) {
         </section>
       </main>
     </section>
-  `;
+  `);
 
   bindFocusEvents();
 }

@@ -39,6 +39,22 @@ export function getConfig(rootDir) {
   const databasePath = process.env.DATABASE_PATH || './data/running.db';
   const port = Number.parseInt(process.env.PORT || '3000', 10);
   const appMode = normalizeAppMode(process.env.APP_MODE);
+  const autoSyncIntervalHours = positiveNumber(
+    process.env.AUTO_SYNC_INTERVAL_HOURS,
+    12
+  );
+  const autoSyncScanMinutes = positiveNumber(
+    process.env.AUTO_SYNC_SCAN_MINUTES,
+    15
+  );
+  const autoSyncBatchSize = positiveInteger(
+    process.env.AUTO_SYNC_BATCH_SIZE,
+    2
+  );
+  const autoSyncInitialDelayMs = positiveInteger(
+    process.env.AUTO_SYNC_INITIAL_DELAY_MS,
+    30000
+  );
 
   return {
     appName: 'Running Dashboard',
@@ -68,12 +84,31 @@ export function getConfig(rootDir) {
         process.env.STRIPE_PORTAL_RETURN_URL ||
         'https://run.mychappell.com/billing'
     },
+    autoSync: {
+      enabled: process.env.AUTO_SYNC_ENABLED !== 'false',
+      intervalHours: autoSyncIntervalHours,
+      intervalSeconds: Math.round(autoSyncIntervalHours * 60 * 60),
+      scanMinutes: autoSyncScanMinutes,
+      scanMs: Math.round(autoSyncScanMinutes * 60 * 1000),
+      batchSize: autoSyncBatchSize,
+      initialDelayMs: Math.max(5_000, autoSyncInitialDelayMs)
+    },
     browserSetupEnabled: process.env.ALLOW_BROWSER_SETUP !== 'false'
   };
 }
 
 function normalizeAppMode(value) {
   return value === 'demo' ? 'demo' : 'live';
+}
+
+function positiveNumber(value, fallback) {
+  const number = Number.parseFloat(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function positiveInteger(value, fallback) {
+  const number = Number.parseInt(value, 10);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
 export function isStravaConfigured(config) {

@@ -2,6 +2,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Stripe from 'stripe';
+import { startAutoSync } from './autoSync.js';
 import {
   browserSetupAllowed,
   getEffectiveConfig,
@@ -51,6 +52,7 @@ const publicDir = path.join(rootDir, 'public');
 let stripeClient = null;
 
 cleanupExpiredAuthData(db);
+const autoSync = startAutoSync(db, config);
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -64,6 +66,7 @@ const server = http.createServer(async (req, res) => {
     if (
       url.pathname === '/focus' ||
       url.pathname === '/about' ||
+      url.pathname === '/privacy' ||
       url.pathname === '/billing' ||
       url.pathname === '/success' ||
       url.pathname === '/cancel' ||
@@ -72,7 +75,9 @@ const server = http.createServer(async (req, res) => {
       url.pathname === '/demo/focus' ||
       url.pathname === '/demo/focus/' ||
       url.pathname === '/demo/about' ||
-      url.pathname === '/demo/about/'
+      url.pathname === '/demo/about/' ||
+      url.pathname === '/demo/privacy' ||
+      url.pathname === '/demo/privacy/'
     ) {
       req.url = '/';
       serveStatic(req, res, publicDir);
@@ -104,6 +109,10 @@ async function routeApi(req, res, url) {
       redirectUri: effectiveConfig.strava.redirectUri,
       databasePath: config.databasePath,
       appMode: config.appMode,
+      autoSync: {
+        enabled: autoSync.enabled,
+        intervalHours: config.autoSync.intervalHours
+      },
       stripePublishableKey: config.stripe.publishableKey
     });
     return;

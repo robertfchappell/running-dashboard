@@ -7,6 +7,7 @@ It includes:
 - SQLite persistence for athletes, tokens, sessions, and activities
 - Token refresh before Strava API calls
 - Activity sync from Strava
+- Automatic background sync while the server is running
 - Separate running and biking dashboards
 - Trend scoring for improving, maintaining, or deproving
 - Zone 2 estimates using an observed-max-HR aerobic percentage band, with a local default fallback
@@ -47,6 +48,12 @@ server. Copy `.env.example` to `.env` and set `STRAVA_CLIENT_ID`,
 - For production, move token storage to encrypted storage and serve behind HTTPS.
 - Browser setup is only allowed from `localhost` by default. Set `ALLOW_BROWSER_SETUP=false` in production if you only want environment-based configuration.
 - The first sync fetches up to `STRAVA_SYNC_PAGES * 100` recent activities. Increase `STRAVA_SYNC_PAGES` in `.env` if you want deeper history.
+- Manual sync still works from the dashboard. Automatic sync also runs while the server is running and defaults to once every 12 hours per connected athlete.
+- Background sync settings:
+  - `AUTO_SYNC_ENABLED=false` disables it.
+  - `AUTO_SYNC_INTERVAL_HOURS=12` controls how old the last sync attempt must be before another automatic sync.
+  - `AUTO_SYNC_SCAN_MINUTES=15` controls how often the scheduler checks for due athletes.
+  - `AUTO_SYNC_BATCH_SIZE=2` controls how many due athletes can be synced per scheduler pass.
 - The running dashboard accepts Strava `Run`, `TrailRun`, `VirtualRun`, and `Wheelchair` sport types.
 - The biking dashboard accepts `Ride`, `MountainBikeRide`, `GravelRide`, `VirtualRide`, `EBikeRide`, `EMountainBikeRide`, `Handcycle`, and `Velomobile`.
 - Activity details are fetched lazily when clicked and cached in `activity_details` for 12 hours.

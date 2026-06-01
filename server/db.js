@@ -339,6 +339,24 @@ export const statements = {
     db.prepare(`
       SELECT * FROM tokens WHERE athlete_id = ?
     `),
+  dueAutoSyncAthletes: (db) =>
+    db.prepare(`
+      SELECT tokens.athlete_id,
+             athletes.firstname,
+             athletes.lastname,
+             latest.last_started_at
+      FROM tokens
+      JOIN athletes ON athletes.id = tokens.athlete_id
+      LEFT JOIN (
+        SELECT athlete_id, MAX(started_at) AS last_started_at
+        FROM sync_runs
+        GROUP BY athlete_id
+      ) latest ON latest.athlete_id = tokens.athlete_id
+      WHERE latest.last_started_at IS NULL
+         OR CAST(strftime('%s', latest.last_started_at) AS INTEGER) <= ?
+      ORDER BY COALESCE(latest.last_started_at, '1970-01-01 00:00:00') ASC
+      LIMIT ?
+    `),
   upsertActivity: (db) =>
     db.prepare(`
       INSERT INTO activities (

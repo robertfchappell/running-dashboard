@@ -48,7 +48,7 @@ button {
 }
 
 .screen {
-  min-height: 100vh;
+  min-height: calc(100vh - 42px);
 }
 
 .screen-login {
@@ -120,6 +120,39 @@ button {
   display: grid;
   gap: 10px;
   margin-top: 14px;
+}
+
+.app-footer,
+.strava-attribution {
+  font-size: 0.8rem;
+  opacity: 0.7;
+  text-align: center;
+}
+
+.strava-attribution {
+  margin: 10px 0 0;
+  color: var(--muted);
+}
+
+.app-footer {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 18px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.app-footer a {
+  color: inherit;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.app-footer a:hover {
+  text-decoration: underline;
 }
 
 .primary-button,
@@ -249,7 +282,7 @@ button {
 }
 
 .dashboard {
-  min-height: 100vh;
+  min-height: calc(100vh - 42px);
   background:
     radial-gradient(circle at 8% 0%, rgba(239, 91, 42, 0.08), transparent 28rem),
     radial-gradient(circle at 92% 0%, rgba(47, 125, 92, 0.08), transparent 30rem),
@@ -1160,6 +1193,38 @@ button {
 
 .methodology-note span {
   color: var(--muted);
+}
+
+.privacy-main {
+  display: grid;
+  place-items: start center;
+}
+
+.privacy-card {
+  width: min(820px, 100%);
+  padding: clamp(28px, 5vw, 52px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 16px 44px rgba(24, 27, 25, 0.08);
+}
+
+.privacy-card .eyebrow {
+  color: var(--muted);
+}
+
+.privacy-card h1 {
+  margin: 0;
+  font-size: clamp(2.4rem, 6vw, 5rem);
+  line-height: 0.95;
+  letter-spacing: 0;
+}
+
+.privacy-card p:not(.eyebrow) {
+  margin: 18px 0 0;
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1.65;
 }
 
 .premium-modal-overlay {
