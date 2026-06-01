@@ -151,7 +151,7 @@ function renderLogin(configStatus, canLogin) {
         }
         <div class="login-actions">
           <a class="secondary-button demo-button" href="/demo">View demo dashboard</a>
-          <a class="secondary-button demo-button" href="/about">How it works</a>
+          <a class="secondary-button demo-button" href="/about">View training signals</a>
         </div>
       </div>
     </section>
@@ -171,21 +171,18 @@ function renderBillingPage(me = { authenticated: false }) {
     billing.cancelAtPeriodEnd && billing.currentPeriodEnd
       ? `Cancellation scheduled for ${formatUnixDate(billing.currentPeriodEnd)}`
       : 'Your plan is active';
+  const actions = me.authenticated
+    ? `<button class="icon-button" data-action="logout" title="Log out" aria-label="Log out">${icons.logout}</button>`
+    : `<a class="primary-button topbar-link" href="/auth/strava">${icons.strava}<span>Sign in</span></a>`;
   app.innerHTML = `
     <section class="dashboard billing-page">
-      <header class="topbar">
-        <div class="brand">
-          <div class="brand-mark">${icons.flame}</div>
-          <div class="brand-text">
-            <strong>Focus Premium</strong>
-            <span>${isPremium ? escapeHtml(cancelCopy) : 'Upgrade your training'}</span>
-          </div>
-        </div>
-        <div class="topbar-actions">
-          <a class="secondary-button topbar-link" href="/about">How it works</a>
-          <a class="secondary-button topbar-link" href="/">Dashboard</a>
-        </div>
-      </header>
+      ${topbarMarkup({
+        active: 'billing',
+        icon: icons.flame,
+        brandName: 'Focus Premium',
+        subtitle: isPremium ? cancelCopy : 'Upgrade your training',
+        actions
+      })}
 
       <main class="dashboard-main billing-main">
         <section class="billing-hero">
@@ -258,44 +255,33 @@ function renderBillingPage(me = { authenticated: false }) {
     }
     cancelSubscription();
   });
+  document.querySelector('[data-action="logout"]')?.addEventListener('click', logout);
 }
 
 function renderMethodologyPage(me = { authenticated: false }) {
   const isAuthenticated = Boolean(me.authenticated);
-  const dashboardHref = state.demoMode ? '/demo' : '/';
-  const focusHref = state.demoMode ? '/demo/focus' : '/focus';
-  const accountActions = state.demoMode
-    ? `<a class="secondary-button topbar-link" href="${dashboardHref}">Dashboard</a>
-        <a class="secondary-button topbar-link" href="${focusHref}">Focus</a>
-        <a class="secondary-button topbar-link" href="/">Connect Strava</a>`
+  const actions = state.demoMode
+    ? '<a class="secondary-button topbar-link action-link" href="/">Connect Strava</a>'
     : isAuthenticated
-      ? `<a class="secondary-button topbar-link" href="/">Dashboard</a>
-          <a class="secondary-button topbar-link" href="/focus">Focus</a>
-          <a class="secondary-button topbar-link" href="/billing">Billing</a>
-          <button class="icon-button" data-action="logout" title="Log out" aria-label="Log out">${icons.logout}</button>`
-      : `<a class="secondary-button topbar-link" href="/">Home</a>
-          <a class="secondary-button topbar-link" href="/demo">Demo</a>
+      ? `<button class="icon-button" data-action="logout" title="Log out" aria-label="Log out">${icons.logout}</button>`
+      : `<a class="secondary-button topbar-link action-link" href="/demo">Demo</a>
           <a class="primary-button topbar-link" href="/auth/strava">${icons.strava}<span>Sign in</span></a>`;
 
   app.innerHTML = `
     <section class="dashboard methodology-page">
-      <header class="topbar">
-        <div class="brand">
-          <div class="brand-mark">${icons.timer}</div>
-          <div class="brand-text">
-            <strong>How it works</strong>
-            <span>Training score methodology</span>
-          </div>
-        </div>
-        <div class="topbar-actions">
-          ${accountActions}
-        </div>
-      </header>
+      ${topbarMarkup({
+        active: 'signals',
+        icon: icons.timer,
+        brandName: 'Training Signals',
+        subtitle: 'Training score methodology',
+        actions,
+        showBilling: isAuthenticated
+      })}
 
       <main class="dashboard-main methodology-main">
         <section class="methodology-hero">
-          <p class="eyebrow">Methodology</p>
-          <h1>What the numbers mean</h1>
+          <p class="eyebrow">Signals</p>
+          <h1>Training signals</h1>
           <p>The app is trying to answer one question first: are you producing more output at the same effort?</p>
         </section>
 
@@ -434,22 +420,58 @@ function termRow(title, copy) {
   `;
 }
 
+function topbarMarkup({
+  active = 'dashboard',
+  icon = icons.miles,
+  brandName = state.activeSport === 'ride' ? 'Bike Room' : 'Run Room',
+  subtitle = '',
+  actions = '',
+  showBilling = !state.demoMode
+} = {}) {
+  const dashboardHref = state.demoMode ? '/demo' : '/';
+  const focusHref = state.demoMode ? '/demo/focus' : '/focus';
+  const signalsHref = state.demoMode ? '/demo/about' : '/about';
+  return `
+    <header class="topbar">
+      <a class="brand brand-link" href="${dashboardHref}" aria-label="${escapeHtml(brandName)} dashboard">
+        <div class="brand-mark">${icon}</div>
+        <div class="brand-text">
+          <strong>${escapeHtml(brandName)}</strong>
+          <span>${escapeHtml(subtitle)}</span>
+        </div>
+      </a>
+      <nav class="topbar-nav" aria-label="Primary">
+        ${navLink('dashboard', 'Dashboard', dashboardHref, active)}
+        ${navLink('focus', 'Focus', focusHref, active)}
+        ${navLink('signals', 'Signals', signalsHref, active)}
+        ${showBilling ? navLink('billing', 'Billing', '/billing', active) : ''}
+      </nav>
+      <div class="topbar-actions">
+        ${actions}
+      </div>
+    </header>
+  `;
+}
+
+function navLink(key, label, href, active) {
+  return `
+    <a class="nav-link ${active === key ? 'active' : ''}" href="${href}">
+      ${escapeHtml(label)}
+    </a>
+  `;
+}
+
 function renderCheckoutResult(status) {
   const success = status === 'success';
   app.innerHTML = `
     <section class="dashboard billing-page">
-      <header class="topbar">
-        <div class="brand">
-          <div class="brand-mark">${success ? icons.flame : icons.close}</div>
-          <div class="brand-text">
-            <strong>${success ? 'Focus Premium' : 'Checkout'}</strong>
-            <span>${success ? 'Subscription started' : 'No subscription changes'}</span>
-          </div>
-        </div>
-        <div class="topbar-actions">
-          <a class="secondary-button topbar-link" href="/">Dashboard</a>
-        </div>
-      </header>
+      ${topbarMarkup({
+        active: 'billing',
+        icon: success ? icons.flame : icons.close,
+        brandName: success ? 'Focus Premium' : 'Checkout',
+        subtitle: success ? 'Subscription started' : 'No subscription changes',
+        actions: ''
+      })}
       <main class="dashboard-main billing-main">
         <section class="billing-hero result-hero">
           <p class="eyebrow">${success ? 'Success' : 'Canceled'}</p>
@@ -585,34 +607,26 @@ function renderDashboard(data) {
   const syncLabel = data.lastSync?.completed_at
     ? `Last sync ${formatDateTime(data.lastSync.completed_at)}`
     : 'Ready to sync';
-  const focusHref = state.demoMode ? '/demo/focus' : '/focus';
-  const aboutHref = state.demoMode ? '/demo/about' : '/about';
   const accountActions = state.demoMode
-    ? '<a class="secondary-button topbar-link" href="/">Connect Strava</a>'
+    ? '<a class="secondary-button topbar-link action-link" href="/">Connect Strava</a>'
     : `<button class="secondary-button" data-action="sync">${icons.sync}<span>Sync</span></button>
           <button class="icon-button" data-action="logout" title="Log out" aria-label="Log out">${icons.logout}</button>`;
 
   app.innerHTML = `
     <section class="dashboard">
-      <header class="topbar">
-        <div class="brand">
-          <div class="brand-mark">${state.activeSport === 'ride' ? icons.bike : icons.miles}</div>
-          <div class="brand-text">
-            <strong>${escapeHtml(athleteName)}</strong>
-            <span>${escapeHtml(syncLabel)}</span>
-          </div>
-        </div>
-        <div class="topbar-actions">
+      ${topbarMarkup({
+        active: 'dashboard',
+        icon: state.activeSport === 'ride' ? icons.bike : icons.miles,
+        brandName: state.activeSport === 'ride' ? 'Bike Room' : 'Run Room',
+        subtitle: `${athleteName} - ${syncLabel}`,
+        actions: `
           <div class="sport-switch" role="tablist" aria-label="Sport">
             ${sportTab('run', data.sports.run.totalSaved)}
             ${sportTab('ride', data.sports.ride.totalSaved)}
           </div>
-          <a class="secondary-button topbar-link" href="${focusHref}">Focus</a>
-          <a class="secondary-button topbar-link" href="${aboutHref}">How it works</a>
-          ${state.demoMode ? '' : '<a class="secondary-button topbar-link" href="/billing">Billing</a>'}
           ${accountActions}
-        </div>
-      </header>
+        `
+      })}
 
       <main class="dashboard-main">
         <section class="status-band">
@@ -722,30 +736,20 @@ function renderFocusPage(data) {
   const syncLabel = data.lastSync?.completed_at
     ? `Last sync ${formatDateTime(data.lastSync.completed_at)}`
     : 'Ready to sync';
-  const dashboardHref = state.demoMode ? '/demo' : '/';
-  const aboutHref = state.demoMode ? '/demo/about' : '/about';
   const accountActions = state.demoMode
-    ? '<a class="secondary-button topbar-link" href="/">Connect Strava</a>'
+    ? '<a class="secondary-button topbar-link action-link" href="/">Connect Strava</a>'
     : `<button class="secondary-button" data-action="sync">${icons.sync}<span>Sync</span></button>
           <button class="icon-button" data-action="logout" title="Log out" aria-label="Log out">${icons.logout}</button>`;
 
   app.innerHTML = `
     <section class="dashboard focus-page">
-      <header class="topbar">
-        <div class="brand">
-          <div class="brand-mark">${state.activeSport === 'ride' ? icons.bike : icons.miles}</div>
-          <div class="brand-text">
-            <strong>${escapeHtml(athleteName)}</strong>
-            <span>${escapeHtml(syncLabel)}</span>
-          </div>
-        </div>
-        <div class="topbar-actions">
-          ${state.demoMode ? '' : '<a class="secondary-button topbar-link" href="/billing">Billing</a>'}
-          <a class="secondary-button topbar-link" href="${aboutHref}">How it works</a>
-          <a class="secondary-button topbar-link" href="${dashboardHref}">Dashboard</a>
-          ${accountActions}
-        </div>
-      </header>
+      ${topbarMarkup({
+        active: 'focus',
+        icon: icons.flame,
+        brandName: 'Run Room',
+        subtitle: `${athleteName} - ${syncLabel}`,
+        actions: accountActions
+      })}
 
       <main class="dashboard-main focus-main">
         <section class="focus-hero">
@@ -1507,7 +1511,7 @@ function renderActivityDrawer(detail) {
       detail.samples.map((sample) => sample.heartRate),
       {
         label: 'bpm',
-        color: '#c2414a'
+        color: '#c94b59'
       }
     );
     drawDetailLineChart(
@@ -1517,7 +1521,7 @@ function renderActivityDrawer(detail) {
       ),
       {
         label: sport === 'run' ? 'pace' : 'mph',
-        color: '#2967b1',
+        color: '#2a7f78',
         formatter: sport === 'run' ? formatPace : (value) => formatNumber(value, 1)
       }
     );
@@ -1589,8 +1593,8 @@ function drawWeeklyChart() {
   drawGrid(ctx, width, height, padding, chartHeight, minValue, maxValue, sport.key);
 
   const gradient = ctx.createLinearGradient(0, padding.top, 0, height - padding.bottom);
-  gradient.addColorStop(0, 'rgba(252, 76, 2, 0.22)');
-  gradient.addColorStop(1, 'rgba(41, 103, 177, 0.03)');
+  gradient.addColorStop(0, 'rgba(239, 91, 42, 0.24)');
+  gradient.addColorStop(1, 'rgba(47, 125, 92, 0.05)');
 
   ctx.beginPath();
   points.forEach((point, index) => {
@@ -1614,7 +1618,7 @@ function drawWeeklyChart() {
       ctx.lineTo(point.x, point.y);
     }
   });
-  ctx.strokeStyle = '#fc4c02';
+  ctx.strokeStyle = '#ef5b2a';
   ctx.lineWidth = 3;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
@@ -1625,12 +1629,12 @@ function drawWeeklyChart() {
     ctx.arc(point.x, point.y, 4, 0, Math.PI * 2);
     ctx.fillStyle = '#ffffff';
     ctx.fill();
-    ctx.strokeStyle = '#fc4c02';
+    ctx.strokeStyle = '#ef5b2a';
     ctx.lineWidth = 2;
     ctx.stroke();
   });
 
-  ctx.fillStyle = '#626b75';
+  ctx.fillStyle = '#667069';
   ctx.font = '12px Inter, system-ui, sans-serif';
   ctx.textAlign = 'center';
   points.forEach((point, index) => {
@@ -1640,7 +1644,7 @@ function drawWeeklyChart() {
   });
 
   ctx.textAlign = 'right';
-  ctx.fillStyle = '#15171a';
+  ctx.fillStyle = '#181b19';
   ctx.font = '700 13px Inter, system-ui, sans-serif';
   ctx.fillText(chartTitle(sport.key), width - padding.right, padding.top + 6);
 
@@ -1734,9 +1738,9 @@ function weeklyTooltipHtml(week, sport) {
 }
 
 function drawGrid(ctx, width, height, padding, chartHeight, minValue, maxValue, sport) {
-  ctx.strokeStyle = '#e7ebef';
+  ctx.strokeStyle = '#e5ece3';
   ctx.lineWidth = 1;
-  ctx.fillStyle = '#626b75';
+  ctx.fillStyle = '#667069';
   ctx.font = '12px Inter, system-ui, sans-serif';
   ctx.textAlign = 'right';
   for (let index = 0; index <= 4; index += 1) {
@@ -1748,7 +1752,7 @@ function drawGrid(ctx, width, height, padding, chartHeight, minValue, maxValue, 
     ctx.stroke();
     ctx.fillText(formatChartValue(value, sport), padding.left - 12, y + 4);
   }
-  ctx.strokeStyle = '#dce2e8';
+  ctx.strokeStyle = '#d9e1d7';
   ctx.beginPath();
   ctx.moveTo(padding.left, padding.top);
   ctx.lineTo(padding.left, height - padding.bottom);
@@ -1770,11 +1774,11 @@ async function drawRouteMap(route) {
 
   const width = rect.width;
   const height = rect.height;
-  ctx.fillStyle = '#eef2f5';
+  ctx.fillStyle = '#f1f5ef';
   ctx.fillRect(0, 0, width, height);
 
   if (!route.length) {
-    ctx.fillStyle = '#626b75';
+    ctx.fillStyle = '#667069';
     ctx.font = '700 14px Inter, system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('No route stream available', width / 2, height / 2);
@@ -1865,18 +1869,18 @@ function drawRouteLine(ctx, route, zoom, topLeft, width, height) {
       ctx.lineTo(point.x, point.y);
     }
   });
-  ctx.strokeStyle = '#fc4c02';
+  ctx.strokeStyle = '#ef5b2a';
   ctx.lineWidth = 4;
   ctx.stroke();
 
   const start = points[0];
   const end = points[points.length - 1];
-  drawMapDot(ctx, start.x, start.y, '#157f5b');
-  drawMapDot(ctx, end.x, end.y, '#c2414a');
+  drawMapDot(ctx, start.x, start.y, '#2f7d5c');
+  drawMapDot(ctx, end.x, end.y, '#c94b59');
 
   ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
   ctx.fillRect(8, height - 28, 214, 20);
-  ctx.fillStyle = '#15171a';
+  ctx.fillStyle = '#181b19';
   ctx.font = '11px Inter, system-ui, sans-serif';
   ctx.textAlign = 'left';
   ctx.fillText('OpenStreetMap', 14, height - 14);
@@ -1946,7 +1950,7 @@ function drawDetailLineChart(canvasId, values, options) {
   ctx.fillRect(0, 0, rect.width, rect.height);
 
   if (cleanValues.length < 2) {
-    ctx.fillStyle = '#626b75';
+    ctx.fillStyle = '#667069';
     ctx.font = '700 14px Inter, system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('No stream data available', rect.width / 2, rect.height / 2);
@@ -1966,7 +1970,7 @@ function drawDetailLineChart(canvasId, values, options) {
   const chartHeight = rect.height - padding.top - padding.bottom;
   const stepX = chartWidth / (cleanValues.length - 1);
 
-  ctx.strokeStyle = '#e7ebef';
+  ctx.strokeStyle = '#e5ece3';
   ctx.lineWidth = 1;
   for (let index = 0; index <= 3; index += 1) {
     const y = padding.top + (chartHeight / 3) * index;
@@ -1993,7 +1997,7 @@ function drawDetailLineChart(canvasId, values, options) {
   ctx.stroke();
 
   const formatter = options.formatter || ((value) => formatNumber(value, 0));
-  ctx.fillStyle = '#626b75';
+  ctx.fillStyle = '#667069';
   ctx.font = '12px Inter, system-ui, sans-serif';
   ctx.textAlign = 'right';
   ctx.fillText(formatter(max), padding.left - 10, padding.top + 5);

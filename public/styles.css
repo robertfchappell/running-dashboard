@@ -1,17 +1,19 @@
 :root {
   color-scheme: light;
-  --bg: #f5f2ec;
+  --bg: #f6f7f3;
   --surface: #ffffff;
-  --surface-soft: #f8fafc;
-  --ink: #15171a;
-  --muted: #626b75;
-  --line: #dce2e8;
-  --orange: #fc4c02;
-  --green: #157f5b;
-  --red: #c2414a;
-  --blue: #2967b1;
-  --amber: #ae7b17;
-  --shadow: 0 20px 60px rgba(21, 23, 26, 0.12);
+  --surface-soft: #f1f5ef;
+  --ink: #181b19;
+  --muted: #667069;
+  --line: #d9e1d7;
+  --orange: #ef5b2a;
+  --green: #2f7d5c;
+  --red: #c94b59;
+  --blue: #2a7f78;
+  --amber: #b47b22;
+  --brand-start: #ef5b2a;
+  --brand-end: #2f7d5c;
+  --shadow: 0 20px 60px rgba(24, 27, 25, 0.12);
 }
 
 * {
@@ -53,7 +55,7 @@ button {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
   background:
-    linear-gradient(90deg, rgba(21, 23, 26, 0.55), rgba(21, 23, 26, 0.08)),
+    linear-gradient(90deg, rgba(24, 27, 25, 0.58), rgba(47, 125, 92, 0.12)),
     url("https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?auto=format&fit=crop&w=1800&q=80")
       center / cover;
   color: #fff;
@@ -154,7 +156,7 @@ button {
 .secondary-button {
   gap: 8px;
   padding: 0 14px;
-  background: #eef2f5;
+  background: var(--surface-soft);
   color: var(--ink);
   font-weight: 750;
 }
@@ -175,7 +177,7 @@ button {
 .icon-button {
   width: 44px;
   height: 44px;
-  background: #eef2f5;
+  background: var(--surface-soft);
   color: var(--ink);
 }
 
@@ -248,22 +250,26 @@ button {
 
 .dashboard {
   min-height: 100vh;
-  background: var(--bg);
+  background:
+    radial-gradient(circle at 8% 0%, rgba(239, 91, 42, 0.08), transparent 28rem),
+    radial-gradient(circle at 92% 0%, rgba(47, 125, 92, 0.08), transparent 30rem),
+    var(--bg);
 }
 
 .topbar {
   position: sticky;
   top: 0;
   z-index: 20;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(210px, 1fr) auto minmax(210px, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
-  min-height: 76px;
-  padding: 14px clamp(18px, 4vw, 54px);
-  background: rgba(245, 242, 236, 0.92);
-  border-bottom: 1px solid rgba(21, 23, 26, 0.08);
-  backdrop-filter: blur(18px);
+  min-height: 78px;
+  padding: 12px clamp(18px, 4vw, 54px);
+  background: rgba(255, 255, 255, 0.9);
+  border-bottom: 1px solid rgba(24, 27, 25, 0.09);
+  box-shadow: 0 10px 30px rgba(24, 27, 25, 0.05);
+  backdrop-filter: blur(20px);
 }
 
 .brand {
@@ -273,6 +279,11 @@ button {
   min-width: 0;
 }
 
+.brand-link {
+  color: var(--ink);
+  text-decoration: none;
+}
+
 .brand-mark {
   display: grid;
   place-items: center;
@@ -280,8 +291,10 @@ button {
   height: 42px;
   flex: 0 0 auto;
   color: #fff;
-  background: var(--ink);
+  background:
+    linear-gradient(135deg, var(--brand-start), var(--brand-end));
   border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(239, 91, 42, 0.24);
 }
 
 .brand-text {
@@ -301,10 +314,57 @@ button {
   font-size: 0.86rem;
 }
 
+.topbar-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-self: center;
+  gap: 4px;
+  padding: 4px;
+  background: rgba(241, 245, 239, 0.86);
+  border: 1px solid rgba(24, 27, 25, 0.06);
+  border-radius: 10px;
+}
+
+.nav-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  color: var(--muted);
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 850;
+  text-decoration: none;
+  transition:
+    color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.nav-link:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.72);
+  transform: translateY(-1px);
+}
+
+.nav-link.active {
+  color: #fff;
+  background: var(--orange);
+  box-shadow: 0 8px 18px rgba(239, 91, 42, 0.22);
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
+  min-width: 0;
+}
+
+.action-link {
+  white-space: nowrap;
 }
 
 .sport-switch {
@@ -312,7 +372,7 @@ button {
   grid-auto-flow: column;
   gap: 4px;
   padding: 4px;
-  background: #eef2f5;
+  background: var(--surface-soft);
   border-radius: 8px;
 }
 
@@ -336,7 +396,7 @@ button {
   min-width: 22px;
   height: 22px;
   padding: 0 6px;
-  background: rgba(21, 23, 26, 0.08);
+  background: rgba(47, 125, 92, 0.11);
   border-radius: 999px;
   font-size: 0.74rem;
 }
@@ -344,7 +404,7 @@ button {
 .sport-tab.active {
   background: #fff;
   color: var(--ink);
-  box-shadow: 0 1px 4px rgba(21, 23, 26, 0.12);
+  box-shadow: 0 1px 4px rgba(24, 27, 25, 0.12);
 }
 
 .dashboard-main {
@@ -365,7 +425,7 @@ button {
   padding: clamp(24px, 4vw, 40px);
   color: #fff;
   background:
-    linear-gradient(135deg, rgba(21, 23, 26, 0.88), rgba(21, 23, 26, 0.68)),
+    linear-gradient(135deg, rgba(24, 27, 25, 0.9), rgba(47, 125, 92, 0.5)),
     url("https://images.unsplash.com/photo-1502224562085-639556652f33?auto=format&fit=crop&w=1600&q=80")
       center / cover;
   border-radius: 8px;
@@ -406,7 +466,7 @@ button {
   gap: 8px;
   padding: 8px 10px;
   border-radius: 999px;
-  background: #eef2f5;
+  background: var(--surface-soft);
   color: var(--muted);
   font-size: 0.84rem;
   font-weight: 800;
@@ -526,7 +586,7 @@ button {
   padding: clamp(28px, 5vw, 52px);
   color: #fff;
   background:
-    linear-gradient(135deg, rgba(21, 23, 26, 0.88), rgba(21, 23, 26, 0.58)),
+    linear-gradient(135deg, rgba(24, 27, 25, 0.88), rgba(239, 91, 42, 0.42)),
     url("https://images.unsplash.com/photo-1461896836934-ffe607ba8211?auto=format&fit=crop&w=1600&q=80")
       center / cover;
   border-radius: 8px;
@@ -631,8 +691,8 @@ button {
 .demo-mode-banner {
   padding: 12px 16px;
   color: var(--ink);
-  background: rgba(41, 103, 177, 0.09);
-  border: 1px solid rgba(41, 103, 177, 0.18);
+  background: rgba(47, 125, 92, 0.1);
+  border: 1px solid rgba(47, 125, 92, 0.2);
   border-radius: 8px;
   font-size: 0.92rem;
   font-weight: 850;
@@ -801,7 +861,7 @@ button {
   padding: clamp(28px, 5vw, 52px);
   color: #fff;
   background:
-    linear-gradient(135deg, rgba(21, 23, 26, 0.9), rgba(21, 23, 26, 0.62)),
+    linear-gradient(135deg, rgba(24, 27, 25, 0.9), rgba(239, 91, 42, 0.45)),
     url("https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?auto=format&fit=crop&w=1600&q=80")
       center / cover;
   border-radius: 8px;
@@ -925,7 +985,7 @@ button {
   padding: clamp(28px, 5vw, 52px);
   color: #fff;
   background:
-    linear-gradient(135deg, rgba(21, 23, 26, 0.88), rgba(21, 23, 26, 0.58)),
+    linear-gradient(135deg, rgba(24, 27, 25, 0.88), rgba(47, 125, 92, 0.46)),
     url("https://images.unsplash.com/photo-1502904550040-7534597429ae?auto=format&fit=crop&w=1600&q=80")
       center / cover;
   border-radius: 8px;
@@ -1189,7 +1249,7 @@ button {
   grid-auto-flow: column;
   gap: 4px;
   padding: 4px;
-  background: #eef2f5;
+  background: var(--surface-soft);
   border-radius: 8px;
 }
 
@@ -1507,6 +1567,25 @@ button {
 }
 
 @media (max-width: 1040px) {
+  .topbar {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .topbar-nav {
+    justify-self: stretch;
+    overflow-x: auto;
+  }
+
+  .nav-link {
+    flex: 1 0 auto;
+  }
+
+  .topbar-actions {
+    justify-content: stretch;
+    flex-wrap: wrap;
+  }
+
   .screen-login,
   .status-band,
   .content-grid,
@@ -1534,12 +1613,15 @@ button {
 }
 
 @media (max-width: 700px) {
-  .topbar {
-    align-items: flex-start;
-    flex-direction: column;
+  .topbar-actions {
+    width: 100%;
   }
 
-  .topbar-actions {
+  .brand {
+    align-items: flex-start;
+  }
+
+  .topbar-nav {
     width: 100%;
   }
 
