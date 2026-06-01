@@ -63,13 +63,16 @@ const server = http.createServer(async (req, res) => {
 
     if (
       url.pathname === '/focus' ||
+      url.pathname === '/about' ||
       url.pathname === '/billing' ||
       url.pathname === '/success' ||
       url.pathname === '/cancel' ||
       url.pathname === '/demo' ||
       url.pathname === '/demo/' ||
       url.pathname === '/demo/focus' ||
-      url.pathname === '/demo/focus/'
+      url.pathname === '/demo/focus/' ||
+      url.pathname === '/demo/about' ||
+      url.pathname === '/demo/about/'
     ) {
       req.url = '/';
       serveStatic(req, res, publicDir);

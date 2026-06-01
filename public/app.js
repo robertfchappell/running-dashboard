@@ -85,6 +85,11 @@ async function init() {
     return;
   }
 
+  if (window.location.pathname === '/about') {
+    renderMethodologyPage(me);
+    return;
+  }
+
   if (window.location.pathname === '/billing') {
     renderBillingPage(me);
     return;
@@ -146,6 +151,7 @@ function renderLogin(configStatus, canLogin) {
         }
         <div class="login-actions">
           <a class="secondary-button demo-button" href="/demo">View demo dashboard</a>
+          <a class="secondary-button demo-button" href="/about">How it works</a>
         </div>
       </div>
     </section>
@@ -176,6 +182,7 @@ function renderBillingPage(me = { authenticated: false }) {
           </div>
         </div>
         <div class="topbar-actions">
+          <a class="secondary-button topbar-link" href="/about">How it works</a>
           <a class="secondary-button topbar-link" href="/">Dashboard</a>
         </div>
       </header>
@@ -251,6 +258,180 @@ function renderBillingPage(me = { authenticated: false }) {
     }
     cancelSubscription();
   });
+}
+
+function renderMethodologyPage(me = { authenticated: false }) {
+  const isAuthenticated = Boolean(me.authenticated);
+  const dashboardHref = state.demoMode ? '/demo' : '/';
+  const focusHref = state.demoMode ? '/demo/focus' : '/focus';
+  const accountActions = state.demoMode
+    ? `<a class="secondary-button topbar-link" href="${dashboardHref}">Dashboard</a>
+        <a class="secondary-button topbar-link" href="${focusHref}">Focus</a>
+        <a class="secondary-button topbar-link" href="/">Connect Strava</a>`
+    : isAuthenticated
+      ? `<a class="secondary-button topbar-link" href="/">Dashboard</a>
+          <a class="secondary-button topbar-link" href="/focus">Focus</a>
+          <a class="secondary-button topbar-link" href="/billing">Billing</a>
+          <button class="icon-button" data-action="logout" title="Log out" aria-label="Log out">${icons.logout}</button>`
+      : `<a class="secondary-button topbar-link" href="/">Home</a>
+          <a class="secondary-button topbar-link" href="/demo">Demo</a>
+          <a class="primary-button topbar-link" href="/auth/strava">${icons.strava}<span>Sign in</span></a>`;
+
+  app.innerHTML = `
+    <section class="dashboard methodology-page">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">${icons.timer}</div>
+          <div class="brand-text">
+            <strong>How it works</strong>
+            <span>Training score methodology</span>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          ${accountActions}
+        </div>
+      </header>
+
+      <main class="dashboard-main methodology-main">
+        <section class="methodology-hero">
+          <p class="eyebrow">Methodology</p>
+          <h1>What the numbers mean</h1>
+          <p>The app is trying to answer one question first: are you producing more output at the same effort?</p>
+        </section>
+
+        <section class="methodology-window-grid" aria-label="Calculation windows">
+          ${methodStat('Dashboard trend', '28 days', 'Compares your last 28 days with the 28 days before that.')}
+          ${methodStat('Focus plan', '30 days', 'Uses last 30 days versus the previous 30 days for coaching targets.')}
+          ${methodStat('Weekly chart', '12 weeks', 'Shows week-by-week volume, Zone 2 performance, HR, and count.')}
+        </section>
+
+        <section class="methodology-grid">
+          <article class="methodology-card methodology-score-card">
+            <span>Trend score</span>
+            <h2>-14 to +14</h2>
+            <p>The full theoretical range is -14 to +14. Most real scores are smaller because missing HR or Zone 2 data contributes zero.</p>
+            <div class="score-scale" aria-label="Trend score scale">
+              <div><strong>-2 or lower</strong><span>Deproving</span></div>
+              <div><strong>-1 to +1</strong><span>Maintaining</span></div>
+              <div><strong>+2 or higher</strong><span>Improving</span></div>
+            </div>
+          </article>
+
+          <article class="methodology-card">
+            <span>Main signal</span>
+            <h2>Pace at the same HR</h2>
+            <p>Runs and rides are grouped into 5 bpm average-HR bands. If you are faster in the same HR band than you were in the previous block, that is the strongest improvement signal.</p>
+          </article>
+
+          <article class="methodology-card">
+            <span>Zone 2</span>
+            <h2>Easy-effort efficiency</h2>
+            <p>Zone 2 is estimated from your highest saved activity HR: 68% to 78% of observed max HR. Zone 2 efficiency is speed divided by average HR for activities in that band.</p>
+          </article>
+
+          <article class="methodology-card">
+            <span>Volume and rhythm</span>
+            <h2>Miles plus frequency</h2>
+            <p>Volume is total miles. Frequency is activity count. More volume helps only when effort is controlled; a volume drop can explain why fitness looks flat.</p>
+          </article>
+        </section>
+
+        <section class="panel methodology-panel">
+          <div class="panel-header">
+            <div>
+              <h2>How the dashboard score is built</h2>
+              <span>Last 28 days vs previous 28 days</span>
+            </div>
+          </div>
+          <div class="methodology-factor-grid">
+            ${factorCard('Same-HR performance', 'Largest weight', 'Speed or pace improvement at comparable average heart rates.')}
+            ${factorCard('Zone 2 efficiency', 'Medium weight', 'Whether easy efforts are producing better output per heartbeat.')}
+            ${factorCard('Volume', 'Small weight', 'Total mileage change. Big drops can pull the score down.')}
+            ${factorCard('Frequency', 'Small weight', 'Run or ride count change. Consistency matters.')}
+            ${factorCard('Longest effort', 'Small weight', 'Whether the long run or ride is progressing.')}
+            ${factorCard('HR context', 'Bonus or penalty', 'Extra credit when pace improves without HR rising; penalty when pace slips without HR dropping.')}
+          </div>
+        </section>
+
+        <section class="panel methodology-panel">
+          <div class="panel-header">
+            <div>
+              <h2>How Focus decides what to fix</h2>
+              <span>Last 30 days vs previous 30 days</span>
+            </div>
+          </div>
+          <div class="methodology-rules">
+            ${ruleRow('Consistency', 'Volume or frequency dropped more than 10%.')}
+            ${ruleRow('Aerobic base', 'Zone 2 efficiency is not improving while volume is not meaningfully down.')}
+            ${ruleRow('Fatigue', 'Average HR is rising and pace is not improving.')}
+            ${ruleRow('Progress', 'Volume is up and Zone 2 efficiency is up.')}
+            ${ruleRow('Maintain', 'None of the above patterns are strong enough yet.')}
+          </div>
+        </section>
+
+        <section class="panel methodology-panel">
+          <div class="panel-header">
+            <div>
+              <h2>Terms</h2>
+              <span>Plain-English definitions</span>
+            </div>
+          </div>
+          <dl class="methodology-terms">
+            ${termRow('Aerobic efficiency', 'Speed divided by average HR. Higher means more speed for each heartbeat.')}
+            ${termRow('Avg HR trend', 'Moving-time-weighted average heart rate compared with the prior block.')}
+            ${termRow('Pace change', 'For running, negative means faster pace. For biking, the app converts speed so negative also means better.')}
+            ${termRow('Zone 2 activity', 'An activity whose average HR lands inside the estimated Zone 2 range.')}
+            ${termRow('Deproving', 'The app sees a clear negative trend, usually slower output at similar HR, lower efficiency, or a large consistency drop.')}
+          </dl>
+        </section>
+
+        <section class="methodology-note">
+          <strong>Important:</strong>
+          <span>This is a coaching signal, not a lab test. Weather, terrain, sleep, heat, devices, and bad HR readings can move the score. The cleaner the HR data and the more history you have, the better the read gets.</span>
+        </section>
+      </main>
+    </section>
+  `;
+
+  document.querySelector('[data-action="logout"]')?.addEventListener('click', logout);
+}
+
+function methodStat(label, value, copy) {
+  return `
+    <article class="method-stat">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <p>${escapeHtml(copy)}</p>
+    </article>
+  `;
+}
+
+function factorCard(title, weight, copy) {
+  return `
+    <article class="factor-card">
+      <span>${escapeHtml(weight)}</span>
+      <strong>${escapeHtml(title)}</strong>
+      <p>${escapeHtml(copy)}</p>
+    </article>
+  `;
+}
+
+function ruleRow(title, copy) {
+  return `
+    <article>
+      <strong>${escapeHtml(title)}</strong>
+      <p>${escapeHtml(copy)}</p>
+    </article>
+  `;
+}
+
+function termRow(title, copy) {
+  return `
+    <div>
+      <dt>${escapeHtml(title)}</dt>
+      <dd>${escapeHtml(copy)}</dd>
+    </div>
+  `;
 }
 
 function renderCheckoutResult(status) {
@@ -384,6 +565,10 @@ function renderCurrentPage() {
     renderFocusPage(state.dashboard);
     return;
   }
+  if (window.location.pathname === '/about' || window.location.pathname === '/demo/about') {
+    renderMethodologyPage(state.currentUser || { authenticated: false });
+    return;
+  }
   if (window.location.pathname === '/billing') {
     renderBillingPage(state.currentUser || { authenticated: true });
     return;
@@ -401,6 +586,7 @@ function renderDashboard(data) {
     ? `Last sync ${formatDateTime(data.lastSync.completed_at)}`
     : 'Ready to sync';
   const focusHref = state.demoMode ? '/demo/focus' : '/focus';
+  const aboutHref = state.demoMode ? '/demo/about' : '/about';
   const accountActions = state.demoMode
     ? '<a class="secondary-button topbar-link" href="/">Connect Strava</a>'
     : `<button class="secondary-button" data-action="sync">${icons.sync}<span>Sync</span></button>
@@ -422,6 +608,7 @@ function renderDashboard(data) {
             ${sportTab('ride', data.sports.ride.totalSaved)}
           </div>
           <a class="secondary-button topbar-link" href="${focusHref}">Focus</a>
+          <a class="secondary-button topbar-link" href="${aboutHref}">How it works</a>
           ${state.demoMode ? '' : '<a class="secondary-button topbar-link" href="/billing">Billing</a>'}
           ${accountActions}
         </div>
@@ -536,6 +723,7 @@ function renderFocusPage(data) {
     ? `Last sync ${formatDateTime(data.lastSync.completed_at)}`
     : 'Ready to sync';
   const dashboardHref = state.demoMode ? '/demo' : '/';
+  const aboutHref = state.demoMode ? '/demo/about' : '/about';
   const accountActions = state.demoMode
     ? '<a class="secondary-button topbar-link" href="/">Connect Strava</a>'
     : `<button class="secondary-button" data-action="sync">${icons.sync}<span>Sync</span></button>
@@ -553,6 +741,7 @@ function renderFocusPage(data) {
         </div>
         <div class="topbar-actions">
           ${state.demoMode ? '' : '<a class="secondary-button topbar-link" href="/billing">Billing</a>'}
+          <a class="secondary-button topbar-link" href="${aboutHref}">How it works</a>
           <a class="secondary-button topbar-link" href="${dashboardHref}">Dashboard</a>
           ${accountActions}
         </div>
