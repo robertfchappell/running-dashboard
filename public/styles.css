@@ -1008,6 +1008,81 @@ button {
   margin-top: 24px;
 }
 
+.admin-main {
+  display: grid;
+  gap: 24px;
+}
+
+.admin-hero {
+  min-height: 260px;
+  padding: clamp(28px, 5vw, 52px);
+  color: #fff;
+  background:
+    linear-gradient(135deg, rgba(24, 27, 25, 0.9), rgba(47, 125, 92, 0.44)),
+    url("https://images.unsplash.com/photo-1517649763962-0c623066013b?auto=format&fit=crop&w=1600&q=80")
+      center / cover;
+  border-radius: 8px;
+}
+
+.admin-hero h1 {
+  max-width: 900px;
+  margin: 0;
+  font-size: clamp(3rem, 7vw, 6rem);
+  line-height: 0.92;
+  letter-spacing: 0;
+}
+
+.admin-hero p:not(.eyebrow) {
+  max-width: 680px;
+  margin: 18px 0 0;
+  color: rgba(255, 255, 255, 0.84);
+  font-size: clamp(1rem, 1.6vw, 1.2rem);
+  line-height: 1.55;
+}
+
+.admin-table-wrap {
+  overflow-x: auto;
+}
+
+.admin-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.admin-table th {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.admin-table td {
+  color: var(--ink);
+  font-weight: 750;
+}
+
+.admin-table td:first-child,
+.admin-time-cell {
+  display: grid;
+  gap: 4px;
+}
+
+.admin-table td:first-child span,
+.admin-time-cell span {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
 .methodology-main {
   display: grid;
   gap: 24px;

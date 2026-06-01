@@ -12,7 +12,7 @@ import {
   saveStravaBrowserSettings,
   stravaConfigSource
 } from './config.js';
-import { openDatabase, statements } from './db.js';
+import { openDatabase, statements, trackEvent } from './db.js';
 import {
   clearOauthStateCookie,
   cleanupExpiredAuthData,
@@ -49,6 +49,10 @@ loadEnv(rootDir);
 const config = getConfig(rootDir);
 const db = openDatabase(config.databasePath);
 const publicDir = path.join(rootDir, 'public');
+const MIN_VALID_UNIX_SECONDS = 946684800;
+const DEFAULT_TIME_ZONE = 'America/New_York';
+const DAY_MS = 86_400_000;
+const CLIENT_TRACKABLE_EVENTS = new Set(['focus_viewed']);
 let stripeClient = null;
 
 cleanupExpiredAuthData(db);
@@ -68,6 +72,7 @@ const server = http.createServer(async (req, res) => {
       url.pathname === '/about' ||
       url.pathname === '/privacy' ||
       url.pathname === '/billing' ||
+      url.pathname === '/admin' ||
       url.pathname === '/success' ||
       url.pathname === '/cancel' ||
       url.pathname === '/demo' ||
@@ -179,7 +184,7 @@ async function routeApi(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/me') {
-    const session = requireSession(db, req);
+    const session = requireTrackedSession(req);
     if (!session) {
       sendJson(res, 200, {
         authenticated: false
@@ -195,6 +200,7 @@ async function routeApi(req, res, url) {
           [session.firstname, session.lastname].filter(Boolean).join(' ') ||
           'Runner',
         profile: session.profile,
+        timezone: session.timezone || null,
         isPremium: Boolean(session.is_premium),
         stripeSubscriptionStatus: session.stripe_subscription_status || null,
         stripeCancelAtPeriodEnd: Boolean(session.stripe_cancel_at_period_end),
@@ -205,7 +211,7 @@ async function routeApi(req, res, url) {
   }
 
   if (req.method === 'POST' && url.pathname === '/api/checkout') {
-    const session = requireSession(db, req);
+    const session = requireTrackedSession(req);
     if (!session) {
       sendError(res, 401, 'Not authenticated.');
       return;
@@ -252,7 +258,7 @@ async function routeApi(req, res, url) {
   }
 
   if (req.method === 'POST' && url.pathname === '/api/billing-portal') {
-    const session = requireSession(db, req);
+    const session = requireTrackedSession(req);
     if (!session) {
       sendError(res, 401, 'Not authenticated.');
       return;
@@ -283,7 +289,7 @@ async function routeApi(req, res, url) {
   }
 
   if (req.method === 'POST' && url.pathname === '/api/cancel-subscription') {
-    const session = requireSession(db, req);
+    const session = requireTrackedSession(req);
     if (!session) {
       sendError(res, 401, 'Not authenticated.');
       return;
@@ -319,26 +325,50 @@ async function routeApi(req, res, url) {
     return;
   }
 
-  if (req.method === 'GET' && url.pathname === '/api/dashboard') {
-    const session = requireSession(db, req);
+  if (req.method === 'POST' && url.pathname === '/api/events') {
+    const session = requireTrackedSession(req);
     if (!session) {
       sendError(res, 401, 'Not authenticated.');
       return;
     }
 
+    const body = await readJsonBody(req);
+    const eventType = String(body.eventType || '').trim();
+    const page = String(body.page || '').trim() || null;
+    if (!CLIENT_TRACKABLE_EVENTS.has(eventType)) {
+      sendError(res, 400, 'Unsupported event type.');
+      return;
+    }
+
+    trackEvent(db, session.athlete_id, eventType, page);
+    sendJson(res, 200, {
+      ok: true
+    });
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/dashboard') {
+    const session = requireTrackedSession(req);
+    if (!session) {
+      sendError(res, 401, 'Not authenticated.');
+      return;
+    }
+
+    trackEvent(db, session.athlete_id, 'dashboard_viewed', 'dashboard');
     sendJson(res, 200, decorateDashboard(buildDashboard(db, session.athlete_id), session));
     return;
   }
 
   const activityMatch = url.pathname.match(/^\/api\/activities\/(\d+)$/);
   if (req.method === 'GET' && activityMatch) {
-    const session = requireSession(db, req);
+    const session = requireTrackedSession(req);
     if (!session) {
       sendError(res, 401, 'Not authenticated.');
       return;
     }
 
     try {
+      trackEvent(db, session.athlete_id, 'activity_detail_viewed', 'activity_detail');
       const result = await loadStravaActivityDetail(
         db,
         getEffectiveConfig(config, db),
@@ -371,13 +401,14 @@ async function routeApi(req, res, url) {
   }
 
   if (req.method === 'POST' && url.pathname === '/api/sync') {
-    const session = requireSession(db, req);
+    const session = requireTrackedSession(req);
     if (!session) {
       sendError(res, 401, 'Not authenticated.');
       return;
     }
 
     try {
+      trackEvent(db, session.athlete_id, 'manual_sync_started', 'dashboard');
       const result = await syncStravaActivities(
         db,
         getEffectiveConfig(config, db),
@@ -390,7 +421,31 @@ async function routeApi(req, res, url) {
     return;
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/admin/usage') {
+    const session = requireTrackedSession(req);
+    if (!session) {
+      sendError(res, 401, 'Not authenticated.');
+      return;
+    }
+
+    sendJson(res, 200, buildUsageReport(clientTimeZone(req)));
+    return;
+  }
+
   notFound(res);
+}
+
+function requireTrackedSession(req) {
+  const session = requireSession(db, req);
+  if (session) {
+    statements.updateAthleteLastSeen(db).run(session.athlete_id);
+    const timeZone = normalizeTimeZone(req.headers['x-client-time-zone']);
+    if (timeZone) {
+      statements.updateAthleteTimezone(db).run(timeZone, session.athlete_id);
+      session.timezone = timeZone;
+    }
+  }
+  return session;
 }
 
 async function handleStravaCallback(req, res, url) {
@@ -424,6 +479,8 @@ async function handleStravaCallback(req, res, url) {
   const tokenResponse = await exchangeCodeForToken(effectiveConfig, code);
   const athleteId = saveAthleteAndToken(db, tokenResponse, scope);
   const session = createSession(db, athleteId);
+  statements.updateAthleteLastSeen(db).run(athleteId);
+  trackEvent(db, athleteId, 'login_completed', 'login');
 
   try {
     await syncStravaActivities(db, effectiveConfig, athleteId);
@@ -434,6 +491,86 @@ async function handleStravaCallback(req, res, url) {
   redirect(res, '/', {
     'set-cookie': [session.header, clearOauthStateCookie()]
   });
+}
+
+function buildUsageReport(timeZone = DEFAULT_TIME_ZONE) {
+  const summary = statements.usageSummary(db).get() || {};
+  const users = statements.usageUsers(db).all().map((user) => ({
+    athleteId: Number(user.athleteId),
+    name: user.name || 'Runner',
+    lastSeen: user.lastSeen || null,
+    timezone: user.timezone || null,
+    dashboardViews: Number(user.dashboardViews) || 0,
+    focusViews: Number(user.focusViews) || 0,
+    activityViews: Number(user.activityViews) || 0,
+    loginCount: Number(user.loginCount) || 0,
+    syncCount: Number(user.syncCount) || 0
+  }));
+  const now = new Date();
+
+  return {
+    totalUsers: Number(summary.totalUsers) || 0,
+    activeToday: users.filter((user) => isSameLocalDay(user.lastSeen, now, timeZone)).length,
+    activeThisWeek: users.filter((user) => isWithinDays(user.lastSeen, now, 7)).length,
+    activeThisMonth: users.filter((user) => isWithinDays(user.lastSeen, now, 30)).length,
+    timeZone,
+    users
+  };
+}
+
+function clientTimeZone(req) {
+  return normalizeTimeZone(req.headers['x-client-time-zone']) || DEFAULT_TIME_ZONE;
+}
+
+function normalizeTimeZone(value) {
+  const timeZone = String(value || '').trim();
+  if (!timeZone || timeZone.length > 64) {
+    return null;
+  }
+
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone }).format(new Date());
+    return timeZone;
+  } catch {
+    return null;
+  }
+}
+
+function isSameLocalDay(value, now, timeZone) {
+  const date = parseUtcDate(value);
+  if (!date) {
+    return false;
+  }
+  return localDayKey(date, timeZone) === localDayKey(now, timeZone);
+}
+
+function isWithinDays(value, now, days) {
+  const date = parseUtcDate(value);
+  if (!date) {
+    return false;
+  }
+  const ageMs = now.getTime() - date.getTime();
+  return ageMs >= 0 && ageMs <= days * DAY_MS;
+}
+
+function localDayKey(date, timeZone) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(date);
+}
+
+function parseUtcDate(value) {
+  if (!value) {
+    return null;
+  }
+  const text = String(value);
+  const date = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)
+    ? new Date(`${text.replace(' ', 'T')}Z`)
+    : new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function decorateDashboard(dashboard, session) {
@@ -518,6 +655,7 @@ function handleSubscriptionChanged(subscription) {
   const subscriptionId = stripeId(subscription);
   const customerId = stripeId(subscription.customer);
   const athleteId = Number(subscription.metadata?.athlete_id);
+  const currentPeriodEnd = subscriptionPeriodEnd(subscription);
   if (Number.isFinite(athleteId)) {
     updateBillingFromSubscription(subscription, athleteId);
     return;
@@ -529,7 +667,7 @@ function handleSubscriptionChanged(subscription) {
       customerId,
       subscription.status || null,
       subscription.cancel_at_period_end ? 1 : 0,
-      subscription.current_period_end || null,
+      currentPeriodEnd,
       subscriptionId
     );
   }
@@ -542,7 +680,7 @@ function updateBillingFromSubscription(subscription, athleteId) {
     stripeId(subscription),
     subscription.status || null,
     subscription.cancel_at_period_end ? 1 : 0,
-    subscription.current_period_end || null,
+    subscriptionPeriodEnd(subscription),
     athleteId
   );
 }
@@ -557,8 +695,26 @@ function subscriptionBillingState(subscription) {
     isPremium: subscriptionIsPremium(subscription),
     subscriptionStatus: subscription.status || null,
     cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
-    currentPeriodEnd: subscription.current_period_end || null
+    currentPeriodEnd: subscriptionPeriodEnd(subscription)
   };
+}
+
+function subscriptionPeriodEnd(subscription) {
+  const candidates = [
+    subscription.current_period_end,
+    subscription.cancel_at,
+    ...(subscription.items?.data || []).map((item) => item.current_period_end)
+  ];
+  const valid = candidates.filter(isValidUnixTimestamp);
+  if (valid.length === 0) {
+    return null;
+  }
+  return Math.min(...valid);
+}
+
+function isValidUnixTimestamp(value) {
+  const timestamp = Number(value);
+  return Number.isFinite(timestamp) && timestamp >= MIN_VALID_UNIX_SECONDS;
 }
 
 function stripeId(value) {

@@ -40,12 +40,14 @@ CREATE TABLE IF NOT EXISTS athletes (
   state TEXT,
   country TEXT,
   sex TEXT,
+  timezone TEXT,
   is_premium INTEGER NOT NULL DEFAULT 0,
   stripe_customer_id TEXT,
   stripe_subscription_id TEXT,
   stripe_subscription_status TEXT,
   stripe_cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
   stripe_current_period_end INTEGER,
+  last_seen_at TEXT,
   raw_json TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -143,6 +145,18 @@ CREATE TABLE IF NOT EXISTS sync_runs (
   message TEXT,
   FOREIGN KEY (athlete_id) REFERENCES athletes(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS user_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  athlete_id INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  page TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (athlete_id) REFERENCES athletes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_events_athlete_type_created
+  ON user_events (athlete_id, event_type, created_at DESC);
 `;
 
 function migrateDatabase(db) {
@@ -169,6 +183,23 @@ function migrateDatabase(db) {
   addAthleteColumn('stripe_subscription_status', 'TEXT');
   addAthleteColumn('stripe_cancel_at_period_end', 'INTEGER NOT NULL DEFAULT 0');
   addAthleteColumn('stripe_current_period_end', 'INTEGER');
+  addAthleteColumn('last_seen_at', 'TEXT');
+  addAthleteColumn('timezone', 'TEXT');
+  db.exec(`
+    UPDATE athletes
+    SET last_seen_at = COALESCE(last_seen_at, updated_at, created_at)
+    WHERE last_seen_at IS NULL
+  `);
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_athletes_last_seen
+      ON athletes (last_seen_at DESC)
+  `);
+  db.exec(`
+    UPDATE athletes
+    SET stripe_current_period_end = NULL
+    WHERE stripe_current_period_end IS NOT NULL
+      AND stripe_current_period_end < 946684800
+  `);
 
   addActivityColumn('average_watts', 'REAL');
   addActivityColumn('max_watts', 'REAL');
@@ -249,6 +280,15 @@ function nullableNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+export function trackEvent(db, athleteId, eventType, page = null) {
+  const id = Number(athleteId);
+  const type = String(eventType || '').trim();
+  if (!Number.isFinite(id) || !type) {
+    return;
+  }
+  statements.trackUserEvent(db).run(id, type, page || null);
+}
+
 export const statements = {
   upsertAthlete: (db) =>
     db.prepare(`
@@ -289,6 +329,7 @@ export const statements = {
              athletes.firstname,
              athletes.lastname,
              athletes.profile,
+             athletes.timezone,
              athletes.is_premium,
              athletes.stripe_customer_id,
              athletes.stripe_subscription_id,
@@ -302,6 +343,24 @@ export const statements = {
   touchSession: (db) =>
     db.prepare(`
       UPDATE sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?
+    `),
+  updateAthleteLastSeen: (db) =>
+    db.prepare(`
+      UPDATE athletes
+      SET last_seen_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `),
+  updateAthleteTimezone: (db) =>
+    db.prepare(`
+      UPDATE athletes
+      SET timezone = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `),
+  trackUserEvent: (db) =>
+    db.prepare(`
+      INSERT INTO user_events (athlete_id, event_type, page)
+      VALUES (?, ?, ?)
     `),
   deleteSession: (db) =>
     db.prepare(`
@@ -510,6 +569,37 @@ export const statements = {
   athleteById: (db) =>
     db.prepare(`
       SELECT * FROM athletes WHERE id = ?
+    `),
+  usageSummary: (db) =>
+    db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM athletes) AS totalUsers,
+        (SELECT COUNT(*) FROM athletes WHERE last_seen_at >= datetime('now', 'start of day')) AS activeToday,
+        (SELECT COUNT(*) FROM athletes WHERE last_seen_at >= datetime('now', '-7 days')) AS activeThisWeek,
+        (SELECT COUNT(*) FROM athletes WHERE last_seen_at >= datetime('now', '-30 days')) AS activeThisMonth
+    `),
+  usageUsers: (db) =>
+    db.prepare(`
+      SELECT
+        athletes.id AS athleteId,
+        COALESCE(
+          NULLIF(TRIM(COALESCE(athletes.firstname, '') || ' ' || COALESCE(athletes.lastname, '')), ''),
+          athletes.username,
+          'Runner'
+        ) AS name,
+        athletes.last_seen_at AS lastSeen,
+        athletes.timezone AS timezone,
+        COALESCE(SUM(CASE WHEN user_events.event_type = 'dashboard_viewed' THEN 1 ELSE 0 END), 0) AS dashboardViews,
+        COALESCE(SUM(CASE WHEN user_events.event_type = 'focus_viewed' THEN 1 ELSE 0 END), 0) AS focusViews,
+        COALESCE(SUM(CASE WHEN user_events.event_type = 'activity_detail_viewed' THEN 1 ELSE 0 END), 0) AS activityViews,
+        COALESCE(SUM(CASE WHEN user_events.event_type = 'login_completed' THEN 1 ELSE 0 END), 0) AS loginCount,
+        COALESCE(SUM(CASE WHEN user_events.event_type = 'manual_sync_started' THEN 1 ELSE 0 END), 0) AS syncCount
+      FROM athletes
+      LEFT JOIN user_events ON user_events.athlete_id = athletes.id
+      GROUP BY athletes.id
+      ORDER BY athletes.last_seen_at IS NULL ASC,
+               athletes.last_seen_at DESC,
+               athletes.created_at DESC
     `),
   updateAthleteBilling: (db) =>
     db.prepare(`

@@ -9,6 +9,9 @@ const state = {
   demoMode: false
 };
 
+const MIN_VALID_UNIX_SECONDS = 946684800;
+const DEFAULT_TIME_ZONE = 'America/New_York';
+
 const icons = {
   strava:
     '<svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m14.6 13.4-2.6-5-2.6 5H5L12 0l7 13.4h-4.4Zm0 0 2.2 4.3 2.2-4.3h3.2L16.8 24l-5.4-10.6h3.2Z"/></svg>',
@@ -107,6 +110,19 @@ async function init() {
     return;
   }
 
+  if (window.location.pathname === '/admin') {
+    if (!configStatus.configured) {
+      renderLogin(configStatus, false);
+      return;
+    }
+    if (!me.authenticated) {
+      renderLogin(configStatus, true);
+      return;
+    }
+    await loadAdminPage();
+    return;
+  }
+
   if (!configStatus.configured) {
     renderLogin(configStatus, false);
     return;
@@ -179,10 +195,13 @@ function renderLogin(configStatus, canLogin) {
 function renderBillingPage(me = { authenticated: false }) {
   const isPremium = Boolean(me.athlete?.isPremium || state.dashboard?.isPremium);
   const billing = getBillingState(me);
+  const currentPeriodEnd = validUnixTimestamp(billing.currentPeriodEnd);
   const planLabel = isPremium ? 'Active plan' : 'Recommended';
   const cancelCopy =
-    billing.cancelAtPeriodEnd && billing.currentPeriodEnd
-      ? `Cancellation scheduled for ${formatUnixDate(billing.currentPeriodEnd)}`
+    billing.cancelAtPeriodEnd
+      ? currentPeriodEnd
+        ? `Cancellation scheduled for ${formatUnixDate(currentPeriodEnd)}`
+        : 'Cancellation scheduled'
       : 'Your plan is active';
   const actions = me.authenticated
     ? `<button class="icon-button" data-action="logout" title="Log out" aria-label="Log out">${icons.logout}</button>`
@@ -225,7 +244,7 @@ function renderBillingPage(me = { authenticated: false }) {
               <li>Personalized coaching insights</li>
               <li>What to fix next guidance</li>
               ${isPremium ? '<li>Update payment method and invoices through Stripe</li>' : ''}
-              ${billing.cancelAtPeriodEnd ? `<li>Cancellation scheduled for ${escapeHtml(formatUnixDate(billing.currentPeriodEnd))}</li>` : ''}
+              ${billing.cancelAtPeriodEnd ? `<li>${escapeHtml(cancelCopy)}</li>` : ''}
             </ul>
             ${
               isPremium
@@ -268,6 +287,86 @@ function renderBillingPage(me = { authenticated: false }) {
     }
     cancelSubscription();
   });
+  document.querySelector('[data-action="logout"]')?.addEventListener('click', logout);
+}
+
+function renderAdminPage(usage) {
+  const rows = usage.users.length
+    ? usage.users
+        .map(
+          (user) => `
+            <tr>
+              <td>
+                <strong>${escapeHtml(user.name)}</strong>
+                <span>${escapeHtml(String(user.athleteId))}</span>
+              </td>
+              <td class="admin-time-cell">
+                <strong>${escapeHtml(formatLastSeen(user.lastSeen, user.timezone || usage.timeZone || getClientTimeZone()))}</strong>
+                <span>${escapeHtml(user.timezone || usage.timeZone || DEFAULT_TIME_ZONE)}</span>
+              </td>
+              <td>${formatNumber(user.dashboardViews, 0)}</td>
+              <td>${formatNumber(user.focusViews, 0)}</td>
+              <td>${formatNumber(user.activityViews, 0)}</td>
+              <td>${formatNumber(user.loginCount, 0)}</td>
+              <td>${formatNumber(user.syncCount, 0)}</td>
+            </tr>
+          `
+        )
+        .join('')
+    : '<tr><td colspan="7">No users have signed in yet.</td></tr>';
+
+  renderApp(`
+    <section class="dashboard admin-page">
+      ${topbarMarkup({
+        active: 'admin',
+        icon: icons.timer,
+        brandName: 'Usage Admin',
+        subtitle: 'User engagement',
+        actions: `<button class="icon-button" data-action="logout" title="Log out" aria-label="Log out">${icons.logout}</button>`
+      })}
+
+      <main class="dashboard-main admin-main">
+        <section class="admin-hero">
+          <p class="eyebrow">Analytics</p>
+          <h1>User engagement</h1>
+          <p>Lightweight SQLite tracking for page views, logins, syncs, and activity-detail usage.</p>
+        </section>
+
+        <section class="metric-grid admin-stats">
+          ${metricCard('Registered', formatNumber(usage.totalUsers, 0), 'total users', icons.miles)}
+          ${metricCard('Today', formatNumber(usage.activeToday, 0), 'active users', icons.heart)}
+          ${metricCard('This week', formatNumber(usage.activeThisWeek, 0), 'last 7 days', icons.timer)}
+          ${metricCard('This month', formatNumber(usage.activeThisMonth, 0), 'last 30 days', icons.flame)}
+        </section>
+
+        <section class="panel admin-panel">
+          <div class="panel-header">
+            <div>
+              <h2>Users</h2>
+              <span>Sorted by most recently active - viewed in ${escapeHtml(usage.timeZone || getClientTimeZone())}</span>
+            </div>
+          </div>
+          <div class="admin-table-wrap">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Last seen</th>
+                  <th>Dashboard</th>
+                  <th>Focus</th>
+                  <th>Activities</th>
+                  <th>Logins</th>
+                  <th>Syncs</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </section>
+  `);
+
   document.querySelector('[data-action="logout"]')?.addEventListener('click', logout);
 }
 
@@ -636,6 +735,11 @@ async function loadDashboard() {
   renderCurrentPage();
 }
 
+async function loadAdminPage() {
+  const usage = await api('/api/admin/usage');
+  renderAdminPage(usage);
+}
+
 function loadDemoDashboard() {
   state.dashboard = createDemoDashboard();
   state.activeSport = 'run';
@@ -658,6 +762,10 @@ function renderCurrentPage() {
   }
   if (window.location.pathname === '/billing') {
     renderBillingPage(state.currentUser || { authenticated: true });
+    return;
+  }
+  if (window.location.pathname === '/admin') {
+    loadAdminPage();
     return;
   }
   renderDashboard(state.dashboard);
@@ -889,6 +997,7 @@ function renderFocusPage(data) {
   `);
 
   bindFocusEvents();
+  trackClientEvent('focus_viewed', 'focus');
 }
 
 function bindFocusEvents() {
@@ -1434,9 +1543,10 @@ async function cancelSubscription() {
 
   try {
     const result = await api('/api/cancel-subscription', { method: 'POST' });
+    const currentPeriodEnd = validUnixTimestamp(result.currentPeriodEnd);
     showToast(
-      result.currentPeriodEnd
-        ? `Cancellation scheduled for ${formatUnixDate(result.currentPeriodEnd)}.`
+      currentPeriodEnd
+        ? `Cancellation scheduled for ${formatUnixDate(currentPeriodEnd)}.`
         : 'Cancellation scheduled.'
     );
     const me = await api('/api/me');
@@ -1454,6 +1564,21 @@ async function cancelSubscription() {
 async function logout() {
   await api('/auth/logout', { method: 'POST' });
   window.location.href = '/';
+}
+
+function trackClientEvent(eventType, page) {
+  if (state.demoMode) {
+    return;
+  }
+  api('/api/events', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({ eventType, page })
+  }).catch((error) => {
+    console.warn('Usage event was not tracked:', error.message);
+  });
 }
 
 async function openActivity(activityId) {
@@ -2547,6 +2672,7 @@ async function api(path, options = {}) {
     ...rest,
     headers: {
       accept: 'application/json',
+      'x-client-time-zone': getClientTimeZone(),
       ...(optionHeaders || {})
     }
   });
@@ -2648,31 +2774,69 @@ function bpm(value) {
 }
 
 function formatDate(value) {
-  return new Date(value).toLocaleDateString('en-US', {
+  return parseAppDate(value).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
-    year: 'numeric'
+    year: 'numeric',
+    timeZone: getClientTimeZone()
   });
 }
 
-function formatDateTime(value) {
-  return new Date(value).toLocaleString('en-US', {
+function formatDateTime(value, timeZone = getClientTimeZone()) {
+  return parseAppDate(value).toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
-    minute: '2-digit'
+    minute: '2-digit',
+    timeZone,
+    timeZoneName: 'short'
   });
 }
 
+function formatLastSeen(value, timeZone = getClientTimeZone()) {
+  if (!value) {
+    return 'Never';
+  }
+  const date = parseAppDate(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Unknown';
+  }
+  return formatDateTime(value, timeZone);
+}
+
 function formatUnixDate(value) {
-  if (!Number.isFinite(Number(value))) {
+  const timestamp = validUnixTimestamp(value);
+  if (!timestamp) {
     return 'the end of the billing period';
   }
-  return new Date(Number(value) * 1000).toLocaleDateString('en-US', {
+  return new Date(timestamp * 1000).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric'
   });
+}
+
+function validUnixTimestamp(value) {
+  const timestamp = Number(value);
+  return Number.isFinite(timestamp) && timestamp >= MIN_VALID_UNIX_SECONDS
+    ? timestamp
+    : null;
+}
+
+function getClientTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_TIME_ZONE;
+  } catch {
+    return DEFAULT_TIME_ZONE;
+  }
+}
+
+function parseAppDate(value) {
+  const text = String(value || '');
+  const date = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)
+    ? new Date(`${text.replace(' ', 'T')}Z`)
+    : new Date(text);
+  return date;
 }
 
 function titleCase(value) {
