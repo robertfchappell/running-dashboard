@@ -1615,6 +1615,7 @@ function renderActivityDrawer(detail) {
     ? detail.route
     : decodePolyline(activity.map.polyline || activity.map.summaryPolyline);
   const hasSamples = detail.samples.length > 0;
+  const insights = buildActivityInsights(detail);
 
   closeActivityDrawer();
   document.body.insertAdjacentHTML(
@@ -1640,6 +1641,8 @@ function renderActivityDrawer(detail) {
             ${detailMetric('Cadence', formatCadence(activity))}
             ${detailMetric('Power', activity.averageWatts ? `${formatNumber(activity.averageWatts, 0)} W` : '-')}
           </section>
+
+          ${activityInsightsMarkup(insights)}
 
           <section class="detail-grid">
             <div class="detail-block">
@@ -1716,6 +1719,358 @@ function renderActivityDrawer(detail) {
       }
     );
   });
+}
+
+function activityInsightsMarkup(insights) {
+  return `
+    <section class="detail-insights">
+      <div class="detail-insight-copy">
+        <span>${escapeHtml(insights.badge)}</span>
+        <h3>${escapeHtml(insights.title)}</h3>
+        <p>${escapeHtml(insights.summary)}</p>
+      </div>
+      <div class="detail-insight-stats">
+        ${insights.stats.map(insightStatMarkup).join('')}
+      </div>
+      <ul class="detail-insight-list">
+        ${insights.bullets.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
+      </ul>
+    </section>
+  `;
+}
+
+function insightStatMarkup(stat) {
+  return `
+    <article>
+      <span>${escapeHtml(stat.label)}</span>
+      <strong>${escapeHtml(stat.value)}</strong>
+      <small>${escapeHtml(stat.note)}</small>
+    </article>
+  `;
+}
+
+function buildActivityInsights(detail) {
+  const activity = detail.activity;
+  const sport = activity.category;
+  const samples = detail.samples || [];
+  const zone2Range = detail.zone2Range || {};
+  const zoneDurations = heartRateZoneDurations(samples, zone2Range);
+  const hrTotalSeconds = zoneDurations.total || 0;
+  const zone2Seconds =
+    hrTotalSeconds > 0
+      ? zoneDurations.zone2
+      : Number.isFinite(detail.zone2?.timeSeconds)
+        ? detail.zone2.timeSeconds
+        : 0;
+  const calculatedZone2Percent = percentOf(zone2Seconds, hrTotalSeconds);
+  const zone2Percent = Number.isFinite(calculatedZone2Percent)
+    ? calculatedZone2Percent
+    : Number.isFinite(detail.zone2?.percent)
+      ? detail.zone2.percent
+      : null;
+  const lowPercent = percentOf(zoneDurations.low, hrTotalSeconds);
+  const highPercent = percentOf(zoneDurations.high, hrTotalSeconds);
+  const halves = splitActivitySamples(samples);
+  const firstHalfHr = averageSampleValue(halves.first, 'heartRate');
+  const secondHalfHr = averageSampleValue(halves.second, 'heartRate');
+  const hrDrift = Number.isFinite(firstHalfHr) && Number.isFinite(secondHalfHr)
+    ? secondHalfHr - firstHalfHr
+    : null;
+  const firstPerformance = averagePerformance(halves.first, sport);
+  const secondPerformance = averagePerformance(halves.second, sport);
+  const performanceDrift =
+    Number.isFinite(firstPerformance) && Number.isFinite(secondPerformance)
+      ? secondPerformance - firstPerformance
+      : null;
+  const zone2Performance =
+    sport === 'run'
+      ? formatPace(detail.zone2?.avgPaceSecondsPerMile)
+      : detail.zone2?.avgSpeedMph
+        ? `${formatNumber(detail.zone2.avgSpeedMph, 1)} mph`
+        : '-';
+  const verdict = activityVerdict({
+    sport,
+    zone2Percent,
+    highPercent,
+    hrDrift,
+    performanceDrift
+  });
+  const bullets = activityInsightBullets({
+    sport,
+    zone2Percent,
+    lowPercent,
+    highPercent,
+    hrDrift,
+    performanceDrift,
+    hasHeartRate: hrTotalSeconds > 0,
+    zone2Range
+  });
+
+  return {
+    badge: 'Coach readout',
+    title: verdict.title,
+    summary: verdict.summary,
+    stats: [
+      {
+        label: 'Zone 2 time',
+        value: zone2Seconds > 0 ? formatDuration(zone2Seconds) : '-',
+        note: Number.isFinite(zone2Percent)
+          ? `${formatNumber(zone2Percent, 1)}% of HR stream (${zone2Range.lower}-${zone2Range.upper} bpm)`
+          : 'Needs HR stream data'
+      },
+      {
+        label: 'Below Zone 2',
+        value: zoneDurations.low > 0 ? formatDuration(zoneDurations.low) : '-',
+        note: Number.isFinite(lowPercent)
+          ? `${formatNumber(lowPercent, 1)}% below aerobic target`
+          : 'Needs HR stream data'
+      },
+      {
+        label: 'Above Zone 2',
+        value: zoneDurations.high > 0 ? formatDuration(zoneDurations.high) : '-',
+        note: Number.isFinite(highPercent)
+          ? `${formatNumber(highPercent, 1)}% harder than Zone 2`
+          : 'Needs HR stream data'
+      },
+      {
+        label: 'HR drift',
+        value: Number.isFinite(hrDrift) ? signedBpm(hrDrift) : '-',
+        note: 'second half vs first half'
+      },
+      {
+        label: sport === 'run' ? 'Z2 pace' : 'Z2 speed',
+        value: zone2Performance,
+        note: 'average while in Zone 2'
+      },
+      {
+        label: sport === 'run' ? 'Late pace' : 'Late speed',
+        value: formatPerformanceDrift(performanceDrift, sport),
+        note: 'second half vs first half'
+      }
+    ],
+    bullets
+  };
+}
+
+function activityVerdict({ sport, zone2Percent, highPercent, hrDrift, performanceDrift }) {
+  const performanceFaded =
+    sport === 'run'
+      ? Number.isFinite(performanceDrift) && performanceDrift > 20
+      : Number.isFinite(performanceDrift) && performanceDrift < -0.4;
+  const performanceImproved =
+    sport === 'run'
+      ? Number.isFinite(performanceDrift) && performanceDrift < -15
+      : Number.isFinite(performanceDrift) && performanceDrift > 0.4;
+
+  if (!Number.isFinite(zone2Percent)) {
+    return {
+      title: 'Limited readout',
+      summary: 'There is not enough heart-rate stream data to judge Zone 2 time or effort control.'
+    };
+  }
+  if (Number.isFinite(hrDrift) && hrDrift >= 8 && performanceFaded) {
+    return {
+      title: 'Fatigue showed late',
+      summary: 'Heart rate climbed while output faded, so this reads like accumulated fatigue or late intensity.'
+    };
+  }
+  if (zone2Percent >= 70 && (!Number.isFinite(hrDrift) || hrDrift <= 6)) {
+    return {
+      title: 'Strong aerobic work',
+      summary: 'Most of the session stayed in Zone 2 with controlled heart-rate drift.'
+    };
+  }
+  if (zone2Percent >= 50) {
+    return {
+      title: 'Mostly aerobic',
+      summary: 'This had a solid aerobic base, with some time drifting outside the Zone 2 target.'
+    };
+  }
+  if (highPercent >= 35) {
+    return {
+      title: 'Moderate to hard effort',
+      summary: 'A large chunk of the activity sat above Zone 2, so it was not truly easy aerobic work.'
+    };
+  }
+  if (performanceImproved && (!Number.isFinite(hrDrift) || hrDrift <= 5)) {
+    return {
+      title: 'Good controlled finish',
+      summary: 'Output improved late without a major heart-rate rise, which is a positive control signal.'
+    };
+  }
+  return {
+    title: 'Steady training session',
+    summary: 'Nothing extreme stands out. Use the Zone 2 split and HR drift to decide how this fits the week.'
+  };
+}
+
+function activityInsightBullets({
+  sport,
+  zone2Percent,
+  lowPercent,
+  highPercent,
+  hrDrift,
+  performanceDrift,
+  hasHeartRate,
+  zone2Range
+}) {
+  const bullets = [];
+  if (!hasHeartRate) {
+    return [
+      'No heart-rate stream was available, so Zone 2 time and HR drift cannot be judged.',
+      'Use pace, speed, power, elevation, and how you felt to classify this workout.'
+    ];
+  }
+
+  if (zone2Percent >= 70) {
+    bullets.push(`You spent ${formatNumber(zone2Percent, 1)}% of HR time in Zone 2, right in the ${zone2Range.lower}-${zone2Range.upper} bpm target.`);
+  } else if (zone2Percent >= 45) {
+    bullets.push(`You spent ${formatNumber(zone2Percent, 1)}% of HR time in Zone 2, so this was partly aerobic but not locked in.`);
+  } else {
+    bullets.push(`Only ${formatNumber(zone2Percent, 1)}% of HR time landed in Zone 2, so this was not mainly an easy aerobic session.`);
+  }
+
+  if (highPercent >= 30) {
+    bullets.push(`${formatNumber(highPercent, 1)}% of HR time was above Zone 2. That is useful if intended, but too much for an easy day.`);
+  } else if (lowPercent >= 25) {
+    bullets.push(`${formatNumber(lowPercent, 1)}% of HR time was below Zone 2, which usually means warm-up, recovery, or very easy pacing.`);
+  }
+
+  if (Number.isFinite(hrDrift)) {
+    if (hrDrift >= 8) {
+      bullets.push(`Heart rate rose ${formatNumber(hrDrift, 0)} bpm from first half to second half. Watch fatigue, heat, hills, or pushing late.`);
+    } else if (hrDrift <= 3) {
+      bullets.push(
+        hrDrift < 0
+          ? `Heart rate dropped ${formatNumber(Math.abs(hrDrift), 0)} bpm in the second half, which points to good control or easing off.`
+          : `Heart-rate drift was only ${formatNumber(hrDrift, 0)} bpm, which points to good control.`
+      );
+    }
+  }
+
+  if (Number.isFinite(performanceDrift)) {
+    if (sport === 'run' && performanceDrift > 20) {
+      bullets.push(`Late pace was ${formatRunPaceDelta(performanceDrift)} slower per mile, so the finish faded.`);
+    } else if (sport === 'run' && performanceDrift < -15) {
+      bullets.push(`Late pace was ${formatRunPaceDelta(performanceDrift)} faster per mile, so you finished stronger.`);
+    } else if (sport === 'ride' && performanceDrift < -0.4) {
+      bullets.push(`Late speed was ${formatNumber(Math.abs(performanceDrift), 1)} mph slower, so output faded.`);
+    } else if (sport === 'ride' && performanceDrift > 0.4) {
+      bullets.push(`Late speed was ${formatNumber(performanceDrift, 1)} mph faster, so you finished stronger.`);
+    }
+  }
+
+  return bullets.slice(0, 4);
+}
+
+function heartRateZoneDurations(samples, zone2Range) {
+  const lower = Number(zone2Range?.lower);
+  const upper = Number(zone2Range?.upper);
+  const hrSamples = (samples || [])
+    .filter(
+      (sample) =>
+        Number.isFinite(sample.heartRate) &&
+        Number.isFinite(sample.timeSeconds) &&
+        Number.isFinite(lower) &&
+        Number.isFinite(upper)
+    )
+    .sort((a, b) => a.timeSeconds - b.timeSeconds);
+
+  if (hrSamples.length < 2) {
+    return { low: 0, zone2: 0, high: 0, total: 0 };
+  }
+
+  const hasMovingFlags = hrSamples.some((sample) => sample.moving);
+  const durations = { low: 0, zone2: 0, high: 0, total: 0 };
+  for (let index = 0; index < hrSamples.length - 1; index += 1) {
+    const sample = hrSamples[index];
+    const next = hrSamples[index + 1];
+    if (hasMovingFlags && sample.moving === false) {
+      continue;
+    }
+    const seconds = Math.max(0, next.timeSeconds - sample.timeSeconds);
+    if (!seconds) {
+      continue;
+    }
+    durations.total += seconds;
+    if (sample.heartRate < lower) {
+      durations.low += seconds;
+    } else if (sample.heartRate <= upper) {
+      durations.zone2 += seconds;
+    } else {
+      durations.high += seconds;
+    }
+  }
+
+  return durations;
+}
+
+function splitActivitySamples(samples) {
+  const timed = (samples || [])
+    .filter((sample) => Number.isFinite(sample.timeSeconds))
+    .sort((a, b) => a.timeSeconds - b.timeSeconds);
+  const source = timed.length >= 4 ? timed : samples || [];
+  if (source.length < 2) {
+    return { first: source, second: source };
+  }
+
+  if (timed.length >= 4) {
+    const start = timed[0].timeSeconds;
+    const end = timed.at(-1).timeSeconds;
+    const midpoint = start + (end - start) / 2;
+    const first = timed.filter((sample) => sample.timeSeconds <= midpoint);
+    const second = timed.filter((sample) => sample.timeSeconds > midpoint);
+    if (first.length && second.length) {
+      return { first, second };
+    }
+  }
+
+  const midpointIndex = Math.floor(source.length / 2);
+  return {
+    first: source.slice(0, midpointIndex),
+    second: source.slice(midpointIndex)
+  };
+}
+
+function averageSampleValue(samples, key) {
+  const values = (samples || [])
+    .map((sample) => Number(sample[key]))
+    .filter(Number.isFinite);
+  if (!values.length) {
+    return null;
+  }
+  return values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function averagePerformance(samples, sport) {
+  return averageSampleValue(
+    samples,
+    sport === 'run' ? 'paceSecondsPerMile' : 'speedMph'
+  );
+}
+
+function percentOf(value, total) {
+  return total > 0 && Number.isFinite(value) ? (value / total) * 100 : null;
+}
+
+function signedBpm(value) {
+  const rounded = Math.round(value);
+  return `${rounded > 0 ? '+' : ''}${rounded} bpm`;
+}
+
+function formatPerformanceDrift(value, sport) {
+  if (!Number.isFinite(value)) {
+    return '-';
+  }
+  const sign = value > 0 ? '+' : value < 0 ? '-' : '';
+  if (sport === 'run') {
+    return `${sign}${formatRunPaceDelta(value)}`;
+  }
+  return `${sign}${formatNumber(Math.abs(value), 1)} mph`;
+}
+
+function formatRunPaceDelta(seconds) {
+  return formatPace(Math.abs(seconds));
 }
 
 function closeActivityDrawer() {

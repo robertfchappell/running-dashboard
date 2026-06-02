@@ -49,8 +49,12 @@ export function buildActivityDetail(activity, detail, streams, source, warning) 
     (sample) =>
       sample.heartRate >= zone2Range.lower && sample.heartRate <= zone2Range.upper
   );
-  const zone2TimeSeconds = estimateSampleSeconds(zone2Samples);
   const hrTimeSeconds = estimateSampleSeconds(hrSamples);
+  const zone2TimeSeconds = estimateHeartRateRangeSeconds(
+    hrSamples,
+    zone2Range.lower,
+    zone2Range.upper
+  );
 
   return {
     source,
@@ -830,6 +834,37 @@ function estimateSampleSeconds(samples) {
     return Math.max(0, Math.max(...times) - Math.min(...times));
   }
   return samples.length;
+}
+
+function estimateHeartRateRangeSeconds(samples, lower, upper) {
+  const timedSamples = samples
+    .filter(
+      (sample) =>
+        Number.isFinite(sample.timeSeconds) &&
+        Number.isFinite(sample.heartRate)
+    )
+    .sort((a, b) => a.timeSeconds - b.timeSeconds);
+
+  if (timedSamples.length < 2) {
+    return samples.filter(
+      (sample) =>
+        Number.isFinite(sample.heartRate) &&
+        sample.heartRate >= lower &&
+        sample.heartRate <= upper
+    ).length;
+  }
+
+  let seconds = 0;
+  for (let index = 0; index < timedSamples.length - 1; index += 1) {
+    const sample = timedSamples[index];
+    const next = timedSamples[index + 1];
+    const delta = Math.max(0, next.timeSeconds - sample.timeSeconds);
+    if (sample.heartRate >= lower && sample.heartRate <= upper) {
+      seconds += delta;
+    }
+  }
+
+  return seconds;
 }
 
 function paceFromSamples(samples) {
