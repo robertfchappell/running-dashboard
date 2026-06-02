@@ -1822,14 +1822,14 @@ function buildActivityInsights(detail) {
         label: 'Below Zone 2',
         value: zoneDurations.low > 0 ? formatDuration(zoneDurations.low) : '-',
         note: Number.isFinite(lowPercent)
-          ? `${formatNumber(lowPercent, 1)}% below aerobic target`
+          ? `${formatNumber(lowPercent, 1)}% easy/recovery range`
           : 'Needs HR stream data'
       },
       {
         label: 'Above Zone 2',
         value: zoneDurations.high > 0 ? formatDuration(zoneDurations.high) : '-',
         note: Number.isFinite(highPercent)
-          ? `${formatNumber(highPercent, 1)}% harder than Zone 2`
+          ? `${formatNumber(highPercent, 1)}% steady/quality effort`
           : 'Needs HR stream data'
       },
       {
@@ -1870,8 +1870,8 @@ function activityVerdict({ sport, zone2Percent, highPercent, hrDrift, performanc
   }
   if (Number.isFinite(hrDrift) && hrDrift >= 8 && performanceFaded) {
     return {
-      title: 'Fatigue showed late',
-      summary: 'Heart rate climbed while output faded, so this reads like accumulated fatigue or late intensity.'
+      title: 'Harder finish profile',
+      summary: 'Heart rate climbed and output eased late. That can happen with hills, heat, fatigue, or a stronger effort than easy pace.'
     };
   }
   if (zone2Percent >= 70 && (!Number.isFinite(hrDrift) || hrDrift <= 6)) {
@@ -1883,13 +1883,13 @@ function activityVerdict({ sport, zone2Percent, highPercent, hrDrift, performanc
   if (zone2Percent >= 50) {
     return {
       title: 'Mostly aerobic',
-      summary: 'This had a solid aerobic base, with some time drifting outside the Zone 2 target.'
+      summary: 'This had a solid aerobic base with some steady or quality work mixed in.'
     };
   }
   if (highPercent >= 35) {
     return {
-      title: 'Moderate to hard effort',
-      summary: 'A large chunk of the activity sat above Zone 2, so it was not truly easy aerobic work.'
+      title: 'Quality or steady effort',
+      summary: 'A large chunk sat above Zone 2. That is useful training when this was meant to be tempo, hills, intervals, or a stronger ride/run.'
     };
   }
   if (performanceImproved && (!Number.isFinite(hrDrift) || hrDrift <= 5)) {
@@ -1900,7 +1900,7 @@ function activityVerdict({ sport, zone2Percent, highPercent, hrDrift, performanc
   }
   return {
     title: 'Steady training session',
-    summary: 'Nothing extreme stands out. Use the Zone 2 split and HR drift to decide how this fits the week.'
+    summary: 'The effort profile looks balanced. Use the Zone 2 split and HR drift to understand where it fits in the week.'
   };
 }
 
@@ -1925,20 +1925,20 @@ function activityInsightBullets({
   if (zone2Percent >= 70) {
     bullets.push(`You spent ${formatNumber(zone2Percent, 1)}% of HR time in Zone 2, right in the ${zone2Range.lower}-${zone2Range.upper} bpm target.`);
   } else if (zone2Percent >= 45) {
-    bullets.push(`You spent ${formatNumber(zone2Percent, 1)}% of HR time in Zone 2, so this was partly aerobic but not locked in.`);
+    bullets.push(`You spent ${formatNumber(zone2Percent, 1)}% of HR time in Zone 2, with a mix of aerobic and steady work.`);
   } else {
-    bullets.push(`Only ${formatNumber(zone2Percent, 1)}% of HR time landed in Zone 2, so this was not mainly an easy aerobic session.`);
+    bullets.push(`${formatNumber(zone2Percent, 1)}% of HR time landed in Zone 2. This looks more like quality, hills, tempo, or mixed-effort training than a pure easy aerobic session.`);
   }
 
   if (highPercent >= 30) {
-    bullets.push(`${formatNumber(highPercent, 1)}% of HR time was above Zone 2. That is useful if intended, but too much for an easy day.`);
+    bullets.push(`${formatNumber(highPercent, 1)}% of HR time was above Zone 2. Count this as a stronger training stimulus and balance it with easier work later.`);
   } else if (lowPercent >= 25) {
     bullets.push(`${formatNumber(lowPercent, 1)}% of HR time was below Zone 2, which usually means warm-up, recovery, or very easy pacing.`);
   }
 
   if (Number.isFinite(hrDrift)) {
     if (hrDrift >= 8) {
-      bullets.push(`Heart rate rose ${formatNumber(hrDrift, 0)} bpm from first half to second half. Watch fatigue, heat, hills, or pushing late.`);
+      bullets.push(`Heart rate rose ${formatNumber(hrDrift, 0)} bpm from first half to second half. That often reflects heat, hills, fueling, or a deliberate stronger finish.`);
     } else if (hrDrift <= 3) {
       bullets.push(
         hrDrift < 0
@@ -1950,11 +1950,11 @@ function activityInsightBullets({
 
   if (Number.isFinite(performanceDrift)) {
     if (sport === 'run' && performanceDrift > 20) {
-      bullets.push(`Late pace was ${formatRunPaceDelta(performanceDrift)} slower per mile, so the finish faded.`);
+      bullets.push(`Late pace was ${formatRunPaceDelta(performanceDrift)} slower per mile. Terrain, heat, stops, or effort distribution may explain the shift.`);
     } else if (sport === 'run' && performanceDrift < -15) {
       bullets.push(`Late pace was ${formatRunPaceDelta(performanceDrift)} faster per mile, so you finished stronger.`);
     } else if (sport === 'ride' && performanceDrift < -0.4) {
-      bullets.push(`Late speed was ${formatNumber(Math.abs(performanceDrift), 1)} mph slower, so output faded.`);
+      bullets.push(`Late speed was ${formatNumber(Math.abs(performanceDrift), 1)} mph slower. Wind, terrain, traffic, or effort distribution may explain the shift.`);
     } else if (sport === 'ride' && performanceDrift > 0.4) {
       bullets.push(`Late speed was ${formatNumber(performanceDrift, 1)} mph faster, so you finished stronger.`);
     }
